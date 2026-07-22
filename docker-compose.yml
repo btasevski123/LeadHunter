@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: leadhunter-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: leadhunter
+      POSTGRES_PASSWORD: leadhunter
+      POSTGRES_DB: leadhunter
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U leadhunter -d leadhunter']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: leadhunter-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: leadhunter-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://leadhunter:leadhunter@postgres:5432/leadhunter?schema=public
+      REDIS_URL: redis://redis:6379
+      API_PORT: 3001
+      API_HOST: 0.0.0.0
+      CORS_ORIGIN: http://localhost:3000
+      STORAGE_ROOT: /app/storage
+      AUDIT_LIGHTWEIGHT: ${AUDIT_LIGHTWEIGHT:-true}
+      SKIP_SCREENSHOTS: ${SKIP_SCREENSHOTS:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      API_KEY: ${API_KEY:-}
+    ports:
+      - '3001:3001'
+    volumes:
+      - ./storage:/app/storage
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:3001
+    container_name: leadhunter-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+    ports:
+      - '3000:3000'
+
+volumes:
+  postgres_data:
+  redis_data:

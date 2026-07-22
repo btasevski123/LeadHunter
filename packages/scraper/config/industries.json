@@ -1,0 +1,72 @@
+[
+  {
+    "id": "PRINTING",
+    "name": "Printing",
+    "keywords": ["печатница", "печатење", "графичка", "print", "printing"]
+  },
+  {
+    "id": "MANUFACTURING",
+    "name": "Manufacturing",
+    "keywords": ["производство", "производител", "manufacturing", "manufacturer"]
+  },
+  {
+    "id": "FACTORIES",
+    "name": "Factories",
+    "keywords": ["фабрика", "фабрики", "factory", "factories"]
+  },
+  {
+    "id": "CONSTRUCTION",
+    "name": "Construction",
+    "keywords": ["градежна", "градежништво", "градежна фирма", "construction"]
+  },
+  {
+    "id": "FURNITURE",
+    "name": "Furniture",
+    "keywords": ["мебел", "производство мебел", "furniture"]
+  },
+  {
+    "id": "METAL_INDUSTRY",
+    "name": "Metal Industry",
+    "keywords": ["метална индустрија", "металопреработка", "metal"]
+  },
+  {
+    "id": "AUTOMOTIVE",
+    "name": "Automotive",
+    "keywords": ["автосервис", "авто сервис", "авто сервиси", "car service"]
+  },
+  {
+    "id": "DENTAL",
+    "name": "Dental",
+    "keywords": ["стоматолог", "стоматолошка", "стоматологија", "dental"]
+  },
+  {
+    "id": "LEGAL",
+    "name": "Legal",
+    "keywords": ["адвокат", "адвокати", "law office", "lawyer"]
+  },
+  {
+    "id": "ACCOUNTING",
+    "name": "Accounting",
+    "keywords": ["сметководство", "сметководствена", "accounting"]
+  },
+  {
+    "id": "TOURISM",
+    "name": "Tourism",
+    "keywords": ["туризам", "туристичка агенција", "tourism"]
+  },
+  {
+    "id": "HOSPITALITY",
+    "name": "Hospitality",
+    "keywords": ["хотел", "ресторан", "hotel", "restaurant"]
+  },
+  {
+    "id": "RETAIL",
+    "name": "Retail",
+    "keywords": ["трговија", "продавница", "retail", "store"]
+  },
+  {
+    "id": "SERVICES",
+    "name": "Services",
+    "keywords": ["услуги", "сервис", "services"]
+  }
+]

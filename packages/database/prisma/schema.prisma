@@ -1,0 +1,361 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OutreachStatus {
+  NOT_CONTACTED
+  CONTACTED
+  REPLIED
+  MEETING_SCHEDULED
+  WON
+  LOST
+}
+
+enum IssueSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ContactType {
+  EMAIL
+  PHONE
+  FACEBOOK
+  LINKEDIN
+  INSTAGRAM
+  OTHER
+}
+
+enum DiscoveryKind {
+  WEBSITE
+  FACEBOOK
+  LINKEDIN
+  INSTAGRAM
+}
+
+enum EmailKind {
+  OUTREACH
+  FOLLOW_UP
+}
+
+enum JobType {
+  SCRAPE
+  AUDIT
+  SCREENSHOTS
+  DISCOVER_CONTACTS
+  EXPORT
+  FULL_SCAN
+  SCRAPE_COMPANYWALL
+  SCRAPE_BIZNIS_MREZA
+  SCRAPE_YELLOW_PAGES
+  GOOGLE_DISCOVERY
+  SCRAPE_INDUSTRY_DIRECTORY
+  WEBSITE_AUDIT
+  CONTACT_DISCOVERY
+  GENERATE_REPORT
+  GOOGLE_MAPS_DISCOVERY
+  COMPANYWALL_ENRICHMENT
+  DIRECTORY_DISCOVERY
+  COMPANY_NORMALIZATION
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum ExportFormat {
+  CSV
+  XLSX
+  PDF
+}
+
+model Company {
+  id                  String    @id @default(cuid())
+  name                String
+  registrationNumber  String?
+  industry            String?
+  city                String?
+  municipality        String?
+  address             String?
+  addressNormalized   String?
+  phone               String?
+  phoneNormalized     String?
+  email               String?
+  website             String?
+  websiteDomain       String?
+  facebookUrl         String?
+  linkedinUrl         String?
+  instagramUrl        String?
+  googleMapsUrl       String?
+  googlePlaceId       String?
+  googleRating        Float?
+  googleReviewsCount  Int?
+  googleCategory      String?
+  googleBusinessStatus String?
+  googleOpeningHours  Json?
+  googlePhotos        Json?
+  googleLastUpdated   DateTime?
+  sourceUrl           String?
+  sourceName          String?
+  sourceReferences    String[]  @default([])
+  sourceQualityScore  Int       @default(0)
+  nameNormalized      String
+  hasWebsite          Boolean   @default(false)
+  verified            Boolean   @default(false)
+  lastScrapedAt       DateTime?
+  latestLeadScore     Int?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  audits             WebsiteAudit[]
+  screenshot         Screenshot?
+  contacts           ContactCandidate[]
+  discoveries        WebsiteDiscovery[]
+  outreach           Outreach?
+  emailTemplates     EmailTemplate[]
+  sources            CompanySource[]
+
+  @@unique([googlePlaceId])
+  @@index([websiteDomain])
+  @@index([phoneNormalized])
+  @@index([email])
+  @@index([registrationNumber])
+  @@index([nameNormalized, city])
+  @@index([addressNormalized])
+  @@index([industry])
+  @@index([city])
+  @@index([municipality])
+  @@index([sourceName])
+  @@index([sourceQualityScore])
+  @@index([googlePlaceId])
+  @@index([googleRating])
+  @@index([latestLeadScore])
+  @@index([hasWebsite])
+  @@index([verified])
+  @@index([lastScrapedAt])
+  @@index([createdAt])
+  @@index([industry, city])
+  @@index([sourceName, industry])
+}
+
+model CompanySource {
+  id         String   @id @default(cuid())
+  companyId  String
+  sourceName String
+  sourceUrl  String?
+  scrapedAt  DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, sourceName])
+  @@index([companyId])
+  @@index([sourceName])
+  @@index([scrapedAt])
+}
+
+model ImportRun {
+  id                 String    @id @default(cuid())
+  providerName       String
+  providerId         String
+  status             JobStatus @default(PENDING)
+  startedAt          DateTime?
+  completedAt        DateTime?
+  companiesFound     Int       @default(0)
+  companiesCreated   Int       @default(0)
+  companiesUpdated   Int       @default(0)
+  duplicatesRemoved  Int       @default(0)
+  errors             Json      @default("[]")
+  industryFilter     String?
+  jobRunId           String?
+  createdAt          DateTime  @default(now())
+
+  @@index([providerName])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model WebsiteAudit {
+  id                       String   @id @default(cuid())
+  companyId                String
+  websiteExists            Boolean  @default(false)
+  websiteAccessible        Boolean  @default(false)
+  sslEnabled               Boolean  @default(false)
+  mobileFriendly           Boolean  @default(false)
+  lighthousePerformance    Float?
+  lighthouseSeo            Float?
+  lighthouseAccessibility  Float?
+  lighthouseBestPractices  Float?
+  hasContactForm           Boolean  @default(false)
+  hasGoogleMaps            Boolean  @default(false)
+  hasSocialLinks           Boolean  @default(false)
+  hasPrivacyPolicy         Boolean  @default(false)
+  hasCookieNotice          Boolean  @default(false)
+  designAgeEstimate        String?
+  leadScore                Int      @default(0)
+  scoreReasons             Json
+  auditSummary             String?
+  aiRecommendations        String?
+  issuesCount              Int      @default(0)
+  isLatest                 Boolean  @default(true)
+  auditedAt                DateTime @default(now())
+  createdAt                DateTime @default(now())
+
+  company Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  issues  AuditIssue[]
+
+  @@index([companyId, isLatest])
+  @@index([leadScore])
+  @@index([auditedAt])
+}
+
+model AuditIssue {
+  id          String        @id @default(cuid())
+  auditId     String
+  code        String
+  severity    IssueSeverity
+  title       String
+  description String
+
+  audit WebsiteAudit @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  @@index([auditId])
+  @@index([code])
+}
+
+model Screenshot {
+  id          String   @id @default(cuid())
+  companyId   String   @unique
+  desktopPath String?
+  mobilePath  String?
+  capturedAt  DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+}
+
+model ContactCandidate {
+  id         String      @id @default(cuid())
+  companyId  String
+  type       ContactType
+  value      String
+  sourceUrl  String?
+  confidence Float       @default(0.5)
+  isPrimary  Boolean     @default(false)
+  createdAt  DateTime    @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, type, value])
+  @@index([companyId])
+  @@index([type])
+}
+
+model WebsiteDiscovery {
+  id            String        @id @default(cuid())
+  companyId     String
+  discoveredUrl String
+  kind          DiscoveryKind
+  confidence    Float
+  method        String
+  createdAt     DateTime      @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+}
+
+model Outreach {
+  id           String         @id @default(cuid())
+  companyId    String         @unique
+  status       OutreachStatus @default(NOT_CONTACTED)
+  notes        String?
+  contactDate  DateTime?
+  followUpDate DateTime?
+  meetingDate  DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  history OutreachNote[]
+
+  @@index([status])
+  @@index([followUpDate])
+}
+
+model OutreachNote {
+  id         String   @id @default(cuid())
+  outreachId String
+  body       String
+  createdAt  DateTime @default(now())
+
+  outreach Outreach @relation(fields: [outreachId], references: [id], onDelete: Cascade)
+
+  @@index([outreachId])
+}
+
+model EmailTemplate {
+  id        String    @id @default(cuid())
+  companyId String?
+  kind      EmailKind @default(OUTREACH)
+  subject   String
+  content   String
+  createdAt DateTime  @default(now())
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([kind])
+}
+
+model AppSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model JobRun {
+  id             String    @id @default(cuid())
+  type           JobType
+  status         JobStatus @default(PENDING)
+  progress       Int       @default(0)
+  totalItems     Int       @default(0)
+  processedItems Int       @default(0)
+  successItems   Int       @default(0)
+  failedItems    Int       @default(0)
+  message        String?
+  result         Json?
+  error          String?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  exports ExportArtifact[]
+
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ExportArtifact {
+  id          String       @id @default(cuid())
+  jobRunId    String?
+  format      ExportFormat
+  storagePath String
+  filters     Json?
+  createdAt   DateTime     @default(now())
+
+  jobRun JobRun? @relation(fields: [jobRunId], references: [id], onDelete: SetNull)
+
+  @@index([format])
+  @@index([createdAt])
+}

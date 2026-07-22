@@ -1,0 +1,30 @@
+# Dependencies
+node_modules
+.turbo
+dist
+.next
+out
+coverage
+*.tsbuildinfo
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Storage (keep structure)
+storage/screenshots/**
+storage/exports/**
+!storage/screenshots/.gitkeep
+!storage/exports/.gitkeep
+apps/api/storage/
+
+# OS / IDE
+.DS_Store
+.idea
+.vscode
+*.log
+
+# Prisma
+packages/database/prisma/*.db
+packages/database/prisma/*.db-journal

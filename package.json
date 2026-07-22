@@ -1,0 +1,41 @@
+{
+  "name": "leadhunter-mk",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LeadHunter MK — discover and audit North Macedonia businesses for web development leads",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "test": "npm run test -w @leadhunter/lead-scoring && npm run test -w @leadhunter/scraper && npm run test -w @leadhunter/shared",
+    "db:generate": "npm run generate -w @leadhunter/database",
+    "db:migrate": "npm run migrate:dev -w @leadhunter/database",
+    "db:deploy": "npm run migrate:deploy -w @leadhunter/database",
+    "db:seed": "npm run seed -w @leadhunter/database",
+    "scrape": "npm run scrape -w @leadhunter/api",
+    "scrape:all": "npm run scrape:all -w @leadhunter/api",
+    "scrape:companywall": "npm run scrape:companywall -w @leadhunter/api",
+    "scrape:biznismreza": "npm run scrape:biznismreza -w @leadhunter/api",
+    "scrape:yellow-pages": "npm run scrape:yellow-pages -w @leadhunter/api",
+    "discover:google": "npm run discover:google -w @leadhunter/api",
+    "scrape:google-maps": "npm run scrape:google-maps -w @leadhunter/api",
+    "normalize": "npm run normalize -w @leadhunter/api",
+    "audit": "npm run audit -w @leadhunter/api",
+    "screenshots": "npm run screenshots -w @leadhunter/api",
+    "discover-contacts": "npm run discover-contacts -w @leadhunter/api",
+    "export": "npm run export -w @leadhunter/api",
+    "full-scan": "npm run full-scan -w @leadhunter/api"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.4",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "npm@10.9.2"
+}
