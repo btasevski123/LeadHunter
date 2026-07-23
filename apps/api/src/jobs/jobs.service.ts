@@ -146,6 +146,9 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       case 'website-audit':
         await this.runAudit(jobRunId, job.data);
         break;
+      case 'places-enrichment':
+        await this.runPlacesEnrichment(jobRunId, Number(job.data.limit || 100));
+        break;
       case 'contact-discovery':
         await this.runDiscoverContacts(jobRunId, Number(job.data.limit || 200));
         break;
@@ -231,6 +234,19 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     const queued = await this.enqueue('contact-discovery', { limit }, job.id);
     if (!queued) void this.runDiscoverContacts(job.id, limit);
     return job;
+  }
+
+  async startPlacesEnrichment(limit = 100) {
+    const job = await this.createJob('PLACES_ENRICHMENT', { limit } as ScrapeOptions);
+    const queued = await this.enqueue('places-enrichment', { limit }, job.id);
+    if (!queued) void this.runPlacesEnrichment(job.id, limit);
+    return job;
+  }
+
+  async runPlacesEnrichmentSync(limit = 100) {
+    const job = await this.createJob('PLACES_ENRICHMENT', { limit } as ScrapeOptions);
+    await this.runPlacesEnrichment(job.id, limit);
+    return this.get(job.id);
   }
 
   async startFullScan(opts: ScrapeOptions = {}) {
@@ -522,18 +538,39 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
     const limit = Math.min(Math.max(limitHint, 20), 100);
     try {
       this.logger.log(`Post-import pipeline starting for up to ${limit} companies`);
-      const contactJob = await this.createJob('CONTACT_DISCOVERY');
-      await this.runDiscoverContacts(contactJob.id, limit);
+      // Website/Places first so contact crawl has URLs to work with
+      const enrichJob = await this.createJob('PLACES_ENRICHMENT', { limit } as ScrapeOptions);
+      await this.runPlacesEnrichment(enrichJob.id, limit);
       const auditJob = await this.createJob('WEBSITE_AUDIT');
       const prev = process.env.AUDIT_LIGHTWEIGHT;
       if (prev === undefined) process.env.AUDIT_LIGHTWEIGHT = 'true';
       await this.runAudit(auditJob.id, { limit });
       if (prev === undefined) delete process.env.AUDIT_LIGHTWEIGHT;
       else process.env.AUDIT_LIGHTWEIGHT = prev;
+      const contactJob = await this.createJob('CONTACT_DISCOVERY');
+      await this.runDiscoverContacts(contactJob.id, limit);
     } catch (err) {
       this.logger.warn(
         `Post-import pipeline failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+  }
+
+  private async runPlacesEnrichment(jobId: string, limit: number) {
+    try {
+      await this.markRunning(jobId, 'Enriching missing websites from Google Places');
+      const result = await this.companies.enrichMissingFromPlaces(limit);
+      await this.markProgress(jobId, {
+        totalItems: result.scanned,
+        processedItems: result.scanned,
+        successItems: result.enriched,
+        failedItems: result.failed,
+        progress: 100,
+        message: `Enriched ${result.enriched} (${result.withWebsite} gained website)`,
+      });
+      await this.markDone(jobId, result);
+    } catch (err) {
+      await this.markFailed(jobId, err);
     }
   }
 
@@ -664,15 +701,15 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
   private async runFullScan(jobId: string, opts: ScrapeOptions = {}) {
     try {
       await this.markRunning(jobId, 'Full scan started');
-      await this.markProgress(jobId, { message: 'Phase 1/4: scrape', progress: 5 });
+      await this.markProgress(jobId, { message: 'Phase 1/5: scrape', progress: 5 });
       const scrapeJob = await this.createJob('SCRAPE', opts);
       await this.runScrape(scrapeJob.id, { ...opts, runPipeline: false });
 
-      await this.markProgress(jobId, { message: 'Phase 2/4: discover contacts', progress: 30 });
-      const contactJob = await this.createJob('CONTACT_DISCOVERY');
-      await this.runDiscoverContacts(contactJob.id, 300);
+      await this.markProgress(jobId, { message: 'Phase 2/5: Places enrichment', progress: 25 });
+      const enrichJob = await this.createJob('PLACES_ENRICHMENT');
+      await this.runPlacesEnrichment(enrichJob.id, 300);
 
-      await this.markProgress(jobId, { message: 'Phase 3/4: audit', progress: 55 });
+      await this.markProgress(jobId, { message: 'Phase 3/5: audit', progress: 45 });
       const prev = process.env.AUDIT_LIGHTWEIGHT;
       if (prev === undefined) process.env.AUDIT_LIGHTWEIGHT = 'true';
       const auditJob = await this.createJob('WEBSITE_AUDIT');
@@ -680,14 +717,18 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
       if (prev === undefined) delete process.env.AUDIT_LIGHTWEIGHT;
       else process.env.AUDIT_LIGHTWEIGHT = prev;
 
-      await this.markProgress(jobId, { message: 'Phase 4/4: screenshots', progress: 85 });
+      await this.markProgress(jobId, { message: 'Phase 4/5: discover contacts', progress: 70 });
+      const contactJob = await this.createJob('CONTACT_DISCOVERY');
+      await this.runDiscoverContacts(contactJob.id, 300);
+
+      await this.markProgress(jobId, { message: 'Phase 5/5: screenshots', progress: 85 });
       if (process.env.SKIP_SCREENSHOTS !== 'true') {
         const shotJob = await this.createJob('SCREENSHOTS');
         await this.runScreenshots(shotJob.id, 50);
       }
 
       await this.markDone(jobId, {
-        phases: ['scrape', 'discover-contacts', 'audit', 'screenshots'],
+        phases: ['scrape', 'places-enrichment', 'audit', 'discover-contacts', 'screenshots'],
       });
     } catch (err) {
       await this.markFailed(jobId, err);

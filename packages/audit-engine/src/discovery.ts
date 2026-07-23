@@ -70,12 +70,17 @@ export async function discoverWebsitePresence(input: {
 
   if (!input.website) {
     const slug = slugifyMk(input.name);
-    const candidates = [
-      `https://${slug}.mk`,
-      `https://www.${slug}.mk`,
-      `http://${slug}.mk`,
-      `https://${slug}.com.mk`,
-    ];
+    const latinSlug = slugifyLatin(input.name);
+    const slugs = Array.from(new Set([slug, latinSlug].filter(Boolean)));
+    const candidates: string[] = [];
+    for (const s of slugs) {
+      candidates.push(
+        `https://${s}.mk`,
+        `https://www.${s}.mk`,
+        `http://${s}.mk`,
+        `https://${s}.com.mk`,
+      );
+    }
 
     for (const candidate of candidates) {
       const ok = await probeUrl(candidate);
@@ -91,8 +96,9 @@ export async function discoverWebsitePresence(input: {
     }
 
     // Social guess from slug (confidence lower — stored for operator review)
+    const socialSlug = latinSlug || slug;
     results.push({
-      discoveredUrl: `https://facebook.com/${slug}`,
+      discoveredUrl: `https://facebook.com/${socialSlug}`,
       kind: 'FACEBOOK',
       confidence: 0.25,
       method: 'social_slug_guess',
@@ -105,6 +111,53 @@ export async function discoverWebsitePresence(input: {
 function slugifyMk(name: string): string {
   return name
     .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+    .slice(0, 40);
+}
+
+/** Cyrillic/MK → Latin slug so guesses like avtoatom.mk work for АВТО АТОМ. */
+function slugifyLatin(name: string): string {
+  const map: Record<string, string> = {
+    а: 'a',
+    б: 'b',
+    в: 'v',
+    г: 'g',
+    д: 'd',
+    ѓ: 'gj',
+    е: 'e',
+    ж: 'zh',
+    з: 'z',
+    ѕ: 'dz',
+    и: 'i',
+    ј: 'j',
+    к: 'k',
+    л: 'l',
+    љ: 'lj',
+    м: 'm',
+    н: 'n',
+    њ: 'nj',
+    о: 'o',
+    п: 'p',
+    р: 'r',
+    с: 's',
+    т: 't',
+    ќ: 'kj',
+    у: 'u',
+    ф: 'f',
+    х: 'h',
+    ц: 'c',
+    ч: 'ch',
+    џ: 'dj',
+    ш: 'sh',
+  };
+  const lower = name.toLowerCase();
+  let out = '';
+  for (const ch of lower) {
+    out += map[ch] ?? ch;
+  }
+  return out
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^\p{L}\p{N}]+/gu, '')

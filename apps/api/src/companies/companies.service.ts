@@ -17,6 +17,7 @@ import {
   captureScreenshots,
   discoverContacts,
   discoverWebsitePresence,
+  enrichFromGooglePlaces,
   generateAiAudit,
 } from '@leadhunter/audit-engine';
 import {
@@ -339,7 +340,12 @@ export class CompaniesService {
     const company = await this.prisma.company.findUnique({ where: { id: companyId } });
     if (!company) throw new NotFoundException('Company not found');
 
-    // Discovery if no website
+    // Google Places enrichment — fills website/Maps IDs missing from directory scrapes
+    if (!company.website || !company.googlePlaceId) {
+      await this.applyPlacesEnrichment(company);
+    }
+
+    // Domain-guess discovery if still no website
     if (!company.website) {
       const discoveries = await discoverWebsitePresence(company);
       for (const d of discoveries) {
@@ -587,6 +593,114 @@ export class CompaniesService {
     return where;
   }
 
+  /**
+   * Backfill website / Google Maps fields for companies that came from directories
+   * without a site (e.g. Yellow Pages) but have a listing on Google Places.
+   */
+  async enrichMissingFromPlaces(limit = 100) {
+    const companies = await this.prisma.company.findMany({
+      where: {
+        OR: [{ website: null }, { hasWebsite: false }, { googlePlaceId: null }],
+      },
+      orderBy: [{ updatedAt: 'desc' }],
+      take: Math.min(Math.max(limit, 1), 500),
+    });
+
+    let enriched = 0;
+    let withWebsite = 0;
+    let failed = 0;
+
+    for (const company of companies) {
+      try {
+        const before = company.website;
+        const ok = await this.applyPlacesEnrichment(company);
+        if (ok) {
+          enriched += 1;
+          if (!before && company.website) withWebsite += 1;
+        }
+        // Light throttle to respect Places API quotas
+        await new Promise((r) => setTimeout(r, 350));
+      } catch {
+        failed += 1;
+      }
+    }
+
+    return { scanned: companies.length, enriched, withWebsite, failed };
+  }
+
+  private async applyPlacesEnrichment(company: {
+    id: string;
+    name: string;
+    city: string | null;
+    phone: string | null;
+    address: string | null;
+    website: string | null;
+    hasWebsite: boolean;
+    googlePlaceId: string | null;
+    googleMapsUrl: string | null;
+    googleRating: number | null;
+    googleReviewsCount: number | null;
+    googleCategory: string | null;
+    phoneNormalized: string | null;
+  }): Promise<boolean> {
+    const places = await enrichFromGooglePlaces({
+      name: company.name,
+      city: company.city,
+      phone: company.phone,
+      address: company.address,
+    });
+    if (!places || places.confidence < 0.72) return false;
+
+    const website = company.website || places.website;
+    const phoneNormalized =
+      company.phoneNormalized || normalizePhoneMk(places.phone) || null;
+
+    await this.prisma.company.update({
+      where: { id: company.id },
+      data: {
+        website: website || undefined,
+        websiteDomain: website ? extractDomain(website) : undefined,
+        hasWebsite: Boolean(website),
+        googlePlaceId: company.googlePlaceId || places.googlePlaceId || undefined,
+        googleMapsUrl: company.googleMapsUrl || places.googleMapsUrl || undefined,
+        googleRating: company.googleRating ?? places.googleRating ?? undefined,
+        googleReviewsCount:
+          company.googleReviewsCount ?? places.googleReviewsCount ?? undefined,
+        googleCategory: company.googleCategory || places.googleCategory || undefined,
+        googleLastUpdated: places.googlePlaceId ? new Date() : undefined,
+        phone: company.phone || places.phone || undefined,
+        phoneNormalized: phoneNormalized || undefined,
+      },
+    });
+
+    company.website = website;
+    company.hasWebsite = Boolean(website);
+    if (!company.googlePlaceId && places.googlePlaceId) {
+      company.googlePlaceId = places.googlePlaceId;
+    }
+    if (!company.googleMapsUrl && places.googleMapsUrl) {
+      company.googleMapsUrl = places.googleMapsUrl;
+    }
+
+    if (places.website) {
+      await this.prisma.websiteDiscovery.create({
+        data: {
+          companyId: company.id,
+          discoveredUrl: places.website,
+          kind: 'WEBSITE',
+          confidence: places.confidence,
+          method: places.method,
+        },
+      });
+    }
+
+    if (places.googlePlaceId) {
+      await this.recordCompanySource(company.id, 'GOOGLE_MAPS', places.googleMapsUrl);
+    }
+
+    return true;
+  }
+
   private async findDuplicate(input: {
     registrationNumber: string | null;
     googlePlaceId: string | null;
@@ -622,6 +736,23 @@ export class CompaniesService {
         where: { phoneNormalized: input.phoneNormalized },
       });
       if (byPhone) return byPhone;
+
+      // Soft phone: same last 7 digits + strong name match (YP vs Maps digit drift)
+      if (input.phoneNormalized.length >= 8) {
+        const softCandidates = await this.prisma.company.findMany({
+          where: {
+            phoneNormalized: { endsWith: input.phoneNormalized.slice(-7) },
+          },
+          take: 20,
+        });
+        const softHit = softCandidates.find(
+          (c) =>
+            c.phoneNormalized &&
+            c.phoneNormalized !== input.phoneNormalized &&
+            nameSimilarity(c.name, input.name) >= 0.55,
+        );
+        if (softHit) return softHit;
+      }
     }
     if (input.email) {
       const byEmail = await this.prisma.company.findFirst({
@@ -630,11 +761,13 @@ export class CompaniesService {
       if (byEmail) return byEmail;
     }
 
+    const cityVariants = input.city ? cityFilterVariants(input.city) : [];
+
     if (input.addressNormalized) {
       const byAddress = await this.prisma.company.findMany({
         where: {
           addressNormalized: input.addressNormalized,
-          ...(input.city ? { city: input.city } : {}),
+          ...(cityVariants.length ? { city: { in: cityVariants } } : {}),
         },
         take: 10,
       });
@@ -646,21 +779,27 @@ export class CompaniesService {
       if (addressHit) return addressHit;
     }
 
-    const sameName = await this.prisma.company.findFirst({
-      where: {
-        nameNormalized: input.nameNormalized,
-        city: input.city || undefined,
-      },
-    });
-    if (sameName) return sameName;
+    // Exact normalized name + any city spelling variant (КОЧАНИ ↔ Кочани)
+    if (input.nameNormalized) {
+      const sameName = await this.prisma.company.findFirst({
+        where: {
+          nameNormalized: input.nameNormalized,
+          ...(cityVariants.length ? { city: { in: cityVariants } } : {}),
+        },
+      });
+      if (sameName) return sameName;
+    }
 
     const candidates = await this.prisma.company.findMany({
-      where: {
-        OR: [{ city: input.city || undefined }, { city: null }],
-      },
-      take: 60,
+      where: cityVariants.length
+        ? { city: { in: cityVariants } }
+        : { OR: [{ city: input.city || undefined }, { city: null }] },
+      take: 80,
       orderBy: { updatedAt: 'desc' },
     });
+    const strong = candidates.find((c) => nameSimilarity(c.name, input.name) >= 0.75);
+    if (strong) return strong;
+
     return candidates.find((c) => nameSimilarity(c.name, input.name) >= 0.9) || null;
   }
 

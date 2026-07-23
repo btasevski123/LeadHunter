@@ -124,6 +124,11 @@ async function main() {
         console.log(await jobs.runDiscoverContactsSync(limit));
         break;
       }
+      case 'enrich-places': {
+        const limit = Number(process.argv[3] || 100);
+        console.log(await jobs.runPlacesEnrichmentSync(limit));
+        break;
+      }
       case 'export': {
         const format = (process.argv[3] || 'CSV').toUpperCase() as 'CSV' | 'XLSX' | 'PDF';
         console.log(await jobs.runExportSync(format));
@@ -147,6 +152,7 @@ Commands:
   audit [limit]
   screenshots [limit]
   discover-contacts [limit]
+  enrich-places [limit]
   export [CSV|XLSX|PDF]
   full-scan
 `);

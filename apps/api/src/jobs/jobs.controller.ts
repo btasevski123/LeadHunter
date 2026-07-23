@@ -63,6 +63,11 @@ export class JobsController {
     return this.jobs.startDiscoverContacts(body?.limit);
   }
 
+  @Post('enrich-places')
+  enrichPlaces(@Body() body?: { limit?: number }) {
+    return this.jobs.startPlacesEnrichment(body?.limit ?? 100);
+  }
+
   @Post('full-scan')
   fullScan(
     @Body()

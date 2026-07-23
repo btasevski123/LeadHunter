@@ -265,6 +265,9 @@ export default function SettingsPage() {
           <Button variant="secondary" onClick={() => jobMutation.mutate('/jobs/scrape')}>
             Scrape
           </Button>
+          <Button variant="secondary" onClick={() => jobMutation.mutate('/jobs/enrich-places')}>
+            Enrich from Google Places
+          </Button>
           <Button variant="secondary" onClick={() => jobMutation.mutate('/jobs/discover-contacts')}>
             Discover contacts
           </Button>
