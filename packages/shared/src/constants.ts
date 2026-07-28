@@ -1,4 +1,10 @@
-import { Industry, INDUSTRY_LABELS, INDUSTRY_VALUES } from './industry';
+import {
+  Industry,
+  INDUSTRY_LABELS,
+  INDUSTRY_VALUES,
+  INDUSTRY_GROUPS,
+  DISCOVERY_INDUSTRIES,
+} from './industry';
 import { MK_CITY_OPTIONS } from './cities';
 
 /** @deprecated Prefer MK_CITY_OPTIONS — Latin-only values don't match Cyrillic DB cities */
@@ -35,13 +41,38 @@ export { MK_CITY_OPTIONS };
 /** Canonical industry filter values used by dashboard + scrapers */
 export const INDUSTRIES = INDUSTRY_VALUES;
 
-/** Human-readable industry labels for UI selects */
+/** Human-readable industry labels for UI selects (all, including legacy) */
 export const INDUSTRY_OPTIONS = INDUSTRY_VALUES.map((value) => ({
   value,
   label: INDUSTRY_LABELS[value],
 }));
 
-export { Industry, INDUSTRY_LABELS };
+/** Discovery / scrape selects — grouped, excludes legacy HOSPITALITY */
+export const INDUSTRY_OPTIONS_GROUPED = INDUSTRY_GROUPS.map((group) => ({
+  id: group.id,
+  label: group.label,
+  options: group.industries.map((value) => ({
+    value,
+    label: INDUSTRY_LABELS[value],
+  })),
+}));
+
+/** Companies filter — discovery groups + legacy hospitality for existing rows */
+export const COMPANY_INDUSTRY_OPTIONS_GROUPED = [
+  ...INDUSTRY_OPTIONS_GROUPED,
+  {
+    id: 'OTHER' as const,
+    label: 'Друго',
+    options: [{ value: Industry.HOSPITALITY, label: INDUSTRY_LABELS[Industry.HOSPITALITY] }],
+  },
+];
+
+export const DISCOVERY_INDUSTRY_OPTIONS = DISCOVERY_INDUSTRIES.map((value) => ({
+  value,
+  label: INDUSTRY_LABELS[value],
+}));
+
+export { Industry, INDUSTRY_LABELS, INDUSTRY_GROUPS };
 
 export const OUTREACH_STATUSES = [
   'NOT_CONTACTED',

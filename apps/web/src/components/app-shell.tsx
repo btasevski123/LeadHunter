@@ -4,7 +4,6 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Building2,
-  Compass,
   Crosshair,
   Download,
   LayoutDashboard,
@@ -19,7 +18,6 @@ import { ThemeToggle } from '@/components/theme-toggle';
 const nav = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/companies', label: 'Companies', icon: Building2 },
-  { href: '/discovery', label: 'Discovery', icon: Compass },
   { href: '/sources', label: 'Sources', icon: Radio },
   { href: '/imports', label: 'Imports', icon: Download },
   { href: '/top-leads', label: 'Top Leads', icon: Crosshair },

@@ -2,71 +2,211 @@
   {
     "id": "PRINTING",
     "name": "Printing",
-    "keywords": ["печатница", "печатење", "графичка", "print", "printing"]
+    "keywords": [
+      "печатница",
+      "печатење",
+      "графичка",
+      "дигитална печатница",
+      "print",
+      "printing",
+      "print shop"
+    ]
   },
   {
     "id": "MANUFACTURING",
     "name": "Manufacturing",
-    "keywords": ["производство", "производител", "manufacturing", "manufacturer"]
+    "keywords": [
+      "производство",
+      "производител",
+      "производствен погон",
+      "manufacturing",
+      "manufacturer"
+    ]
   },
   {
     "id": "FACTORIES",
     "name": "Factories",
-    "keywords": ["фабрика", "фабрики", "factory", "factories"]
+    "keywords": ["фабрика", "фабрики", "индустриски погон", "factory", "factories", "plant"]
   },
   {
     "id": "CONSTRUCTION",
     "name": "Construction",
-    "keywords": ["градежна", "градежништво", "градежна фирма", "construction"]
+    "keywords": [
+      "градежна",
+      "градежништво",
+      "градежна фирма",
+      "изведувач",
+      "construction",
+      "contractor"
+    ]
   },
   {
     "id": "FURNITURE",
     "name": "Furniture",
-    "keywords": ["мебел", "производство мебел", "furniture"]
+    "keywords": ["мебел", "производство мебел", "мебел салон", "furniture", "furniture store"]
   },
   {
     "id": "METAL_INDUSTRY",
     "name": "Metal Industry",
-    "keywords": ["метална индустрија", "металопреработка", "metal"]
+    "keywords": [
+      "метална индустрија",
+      "металопреработка",
+      "челик",
+      "железара",
+      "metal",
+      "steel"
+    ]
   },
   {
     "id": "AUTOMOTIVE",
     "name": "Automotive",
-    "keywords": ["автосервис", "авто сервис", "авто сервиси", "car service"]
+    "keywords": [
+      "автосервис",
+      "авто сервис",
+      "авто сервиси",
+      "автоперална",
+      "car service",
+      "auto repair",
+      "car wash"
+    ]
   },
   {
     "id": "DENTAL",
-    "name": "Dental",
-    "keywords": ["стоматолог", "стоматолошка", "стоматологија", "dental"]
+    "name": "Стоматологија",
+    "keywords": [
+      "стоматолог",
+      "стоматолошка",
+      "стоматологија",
+      "пзу стоматологија",
+      "дентална ординација",
+      "dental",
+      "dentist"
+    ]
+  },
+  {
+    "id": "HEALTHCARE",
+    "name": "ПЗУ / приватни лекари",
+    "keywords": [
+      "пзу",
+      "приватна здравствена установа",
+      "приватна ординација",
+      "приватен лекар",
+      "ординација",
+      "клиника",
+      "специјалист",
+      "doctor",
+      "clinic",
+      "medical"
+    ]
   },
   {
     "id": "LEGAL",
     "name": "Legal",
-    "keywords": ["адвокат", "адвокати", "law office", "lawyer"]
+    "keywords": ["адвокат", "адвокати", "адвокатска канцеларија", "law office", "lawyer", "attorney"]
   },
   {
     "id": "ACCOUNTING",
     "name": "Accounting",
-    "keywords": ["сметководство", "сметководствена", "accounting"]
+    "keywords": [
+      "сметководство",
+      "сметководствена",
+      "сметководител",
+      "книговодство",
+      "accounting",
+      "bookkeeping"
+    ]
   },
   {
     "id": "TOURISM",
     "name": "Tourism",
-    "keywords": ["туризам", "туристичка агенција", "tourism"]
+    "keywords": [
+      "туризам",
+      "туристичка агенција",
+      "тура оператор",
+      "tourism",
+      "travel agency"
+    ]
   },
   {
     "id": "HOSPITALITY",
-    "name": "Hospitality",
+    "name": "Hospitality (legacy)",
     "keywords": ["хотел", "ресторан", "hotel", "restaurant"]
+  },
+  {
+    "id": "FOOD_BEVERAGE",
+    "name": "Ресторани и храна",
+    "keywords": [
+      "ресторан",
+      "кафеана",
+      "пицерија",
+      "брза храна",
+      "кафе бар",
+      "пекара",
+      "слаткарница",
+      "угостителство",
+      "гостилница",
+      "бар",
+      "restaurant",
+      "cafe",
+      "bakery",
+      "pizzeria"
+    ]
+  },
+  {
+    "id": "LODGING",
+    "name": "Хотели / сместување",
+    "keywords": [
+      "хотел",
+      "апартман",
+      "пансион",
+      "сместување",
+      "хостел",
+      "hotel",
+      "apartment",
+      "hostel",
+      "guesthouse"
+    ]
+  },
+  {
+    "id": "FITNESS",
+    "name": "Фитнес / теретани",
+    "keywords": [
+      "теретана",
+      "фитнес",
+      "фитнес центар",
+      "фитнес клуб",
+      "кросфит",
+      "јога студио",
+      "gym",
+      "fitness",
+      "fitness center"
+    ]
   },
   {
     "id": "RETAIL",
     "name": "Retail",
-    "keywords": ["трговија", "продавница", "retail", "store"]
+    "keywords": [
+      "трговија",
+      "продавница",
+      "маркет",
+      "бутик",
+      "retail",
+      "store",
+      "shop",
+      "supermarket"
+    ]
   },
   {
     "id": "SERVICES",
     "name": "Services",
-    "keywords": ["услуги", "сервис", "services"]
+    "keywords": [
+      "услуги",
+      "сервис",
+      "фризер",
+      "козметички салон",
+      "services",
+      "salon",
+      "beauty salon"
+    ]
   }
 ]

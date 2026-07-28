@@ -40,6 +40,14 @@ type CompanyDetail = {
   screenshot: { desktopPath: string | null; mobilePath: string | null } | null;
   contacts: { id: string; type: string; value: string; confidence: number; isPrimary: boolean }[];
   emailTemplates: { id: string; subject: string; content: string; kind: string; createdAt: string }[];
+  classification: {
+    id: string;
+    classification: string;
+    confidence: number;
+    reasons: string[];
+    recommendedService: string;
+    updatedAt: string;
+  } | null;
   audits: {
     id: string;
     leadScore: number;
@@ -74,6 +82,11 @@ export default function CompanyDetailPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['company', id] }),
   });
 
+  const classifyMutation = useMutation({
+    mutationFn: () => api.post(`/companies/${id}/classify`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['company', id] }),
+  });
+
   const emailMutation = useMutation({
     mutationFn: () => api.post('/emails/generate', { companyId: id, kind: 'OUTREACH' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['company', id] }),
@@ -101,6 +114,7 @@ export default function CompanyDetailPage() {
   }
 
   const audit = data.audits[0];
+  const classification = data.classification;
   const desktop = storageUrl(data.screenshot?.desktopPath);
   const mobile = storageUrl(data.screenshot?.mobilePath);
 
@@ -119,6 +133,13 @@ export default function CompanyDetailPage() {
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => auditMutation.mutate()} disabled={auditMutation.isPending}>
             {auditMutation.isPending ? 'Auditing…' : 'Run audit'}
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => classifyMutation.mutate()}
+            disabled={classifyMutation.isPending}
+          >
+            {classifyMutation.isPending ? 'Classifying…' : 'Classify lead'}
           </Button>
           <Button variant="secondary" onClick={() => emailMutation.mutate()} disabled={emailMutation.isPending}>
             Generate email
@@ -159,6 +180,62 @@ export default function CompanyDetailPage() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+          <div>
+            <CardTitle>Classification</CardTitle>
+            <CardDescription>
+              {classification
+                ? `Updated ${formatDate(classification.updatedAt)}`
+                : 'Deterministic KVADRA opportunity rules'}
+            </CardDescription>
+          </div>
+          <Button
+            variant="secondary"
+            onClick={() => classifyMutation.mutate()}
+            disabled={classifyMutation.isPending}
+          >
+            {classifyMutation.isPending ? 'Recalculating…' : classification ? 'Recalculate' : 'Classify'}
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          {classification ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-md bg-muted/40 px-3 py-3">
+                  <div className="text-xs text-muted-foreground">Classification</div>
+                  <div className="mt-1 font-medium">{classification.classification}</div>
+                </div>
+                <div className="rounded-md bg-muted/40 px-3 py-3">
+                  <div className="text-xs text-muted-foreground">Confidence</div>
+                  <div className="mt-1 font-medium">{classification.confidence}%</div>
+                </div>
+                <div className="rounded-md bg-muted/40 px-3 py-3">
+                  <div className="text-xs text-muted-foreground">Recommended Service</div>
+                  <div className="mt-1 font-medium">{classification.recommendedService}</div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="font-medium">Reasons</div>
+                {classification.reasons.length === 0 ? (
+                  <p className="text-muted-foreground">No reasons recorded.</p>
+                ) : (
+                  classification.reasons.map((reason) => (
+                    <div key={reason} className="rounded-md border border-border px-3 py-2">
+                      {reason}
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          ) : (
+            <p className="text-muted-foreground">
+              No classification yet. Run Classify to determine the KVADRA service opportunity.
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>

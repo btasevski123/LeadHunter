@@ -1,62 +1,25 @@
 import {
-  extractDomain,
-  nameSimilarity,
+  canonicalizeCity,
+  matchCompanyIdentity,
   normalizeEmail,
-  normalizeName,
-  normalizePhoneMk,
   normalizeRegistrationNumber,
   normalizeUrl,
+  type CompanyIdentity,
+  type MatchResult,
   type RawCompany,
 } from '@leadhunter/shared';
 
-/** Normalize free-text MK addresses for fuzzy matching. */
-export function normalizeAddress(input?: string | null): string | null {
-  if (!input) return null;
-  const value = input
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\b(ul\.?|ulica|бул\.?|bulevar|бр\.?|br\.?|no\.?|number)\b/gi, ' ')
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return value || null;
-}
+export {
+  addressSimilarity,
+  normalizeAddress,
+  significantTokenOverlap,
+  type CompanyIdentity,
+  type MatchReason,
+  type MatchResult,
+} from '@leadhunter/shared';
 
-export function addressSimilarity(a?: string | null, b?: string | null): number {
-  const na = normalizeAddress(a);
-  const nb = normalizeAddress(b);
-  if (!na || !nb) return 0;
-  if (na === nb) return 1;
-  const ta = new Set(na.split(' ').filter((t) => t.length > 1));
-  const tb = new Set(nb.split(' ').filter((t) => t.length > 1));
-  if (!ta.size || !tb.size) return 0;
-  let inter = 0;
-  for (const t of ta) if (tb.has(t)) inter += 1;
-  const jaccard = inter / (ta.size + tb.size - inter);
-
-  // Boost when street numbers match
-  const numsA: string[] = na.match(/\d+/g) || [];
-  const numsB: string[] = nb.match(/\d+/g) || [];
-  const numHit = numsA.some((n) => numsB.includes(n));
-  return Math.min(1, jaccard + (numHit ? 0.25 : 0));
-}
-
-function significantTokenOverlap(a: string, b: string): boolean {
-  const stop = new Set(['doo', 'dooel', 'ltd', 'llc', 'mk', 'skopje', 'bitola']);
-  const ta = new Set(
-    normalizeName(a)
-      .split(' ')
-      .filter((t) => t.length >= 3 && !stop.has(t)),
-  );
-  const tb = new Set(
-    normalizeName(b)
-      .split(' ')
-      .filter((t) => t.length >= 3 && !stop.has(t)),
-  );
-  for (const t of ta) if (tb.has(t)) return true;
-  return false;
-}
+/** @deprecated Use `CompanyIdentity` from `@leadhunter/shared`. */
+export type MatchCandidate = CompanyIdentity;
 
 export function preferCanonicalName(a: string, b: string): string {
   // Prefer legal-form heavy names (DOO/DOOEL) when merging Google short names
@@ -67,38 +30,10 @@ export function preferCanonicalName(a: string, b: string): string {
   return a.length >= b.length ? a : b;
 }
 
-export interface MatchCandidate {
-  id?: string;
-  name: string;
-  registrationNumber?: string | null;
-  website?: string | null;
-  websiteDomain?: string | null;
-  phone?: string | null;
-  phoneNormalized?: string | null;
-  email?: string | null;
-  address?: string | null;
-  city?: string | null;
-  googlePlaceId?: string | null;
-}
-
-export type MatchReason =
-  | 'registrationNumber'
-  | 'googlePlaceId'
-  | 'websiteDomain'
-  | 'phone'
-  | 'email'
-  | 'address'
-  | 'name';
-
-export interface MatchResult {
-  matched: boolean;
-  reason?: MatchReason;
-  score: number;
-}
-
 /**
- * Central company normalization + cross-source identity matching.
- * Priority: registration → place id → domain → phone → email → address → name.
+ * Company normalization for raw scraped records. Identity matching itself is
+ * delegated to `matchCompanyIdentity` in `@leadhunter/shared` so the in-batch
+ * dedupe here and the database upsert in the API apply identical rules.
  */
 export class CompanyNormalizer {
   normalize(raw: RawCompany): RawCompany {
@@ -110,6 +45,7 @@ export class CompanyNormalizer {
       email: normalizeEmail(raw.email),
       phone: raw.phone?.trim() || null,
       address: raw.address?.trim() || null,
+      city: canonicalizeCity(raw.city),
       facebookUrl: normalizeUrl(raw.facebookUrl),
       linkedinUrl: normalizeUrl(raw.linkedinUrl),
       instagramUrl: normalizeUrl(raw.instagramUrl),
@@ -119,59 +55,8 @@ export class CompanyNormalizer {
     };
   }
 
-  match(a: MatchCandidate, b: MatchCandidate): MatchResult {
-    const regA = normalizeRegistrationNumber(a.registrationNumber);
-    const regB = normalizeRegistrationNumber(b.registrationNumber);
-    if (regA && regB && regA === regB) {
-      return { matched: true, reason: 'registrationNumber', score: 1 };
-    }
-
-    if (a.googlePlaceId && b.googlePlaceId && a.googlePlaceId === b.googlePlaceId) {
-      return { matched: true, reason: 'googlePlaceId', score: 1 };
-    }
-
-    const domainA = a.websiteDomain || extractDomain(a.website);
-    const domainB = b.websiteDomain || extractDomain(b.website);
-    if (domainA && domainB && domainA === domainB) {
-      return { matched: true, reason: 'websiteDomain', score: 0.98 };
-    }
-
-    const phoneA = a.phoneNormalized || normalizePhoneMk(a.phone);
-    const phoneB = b.phoneNormalized || normalizePhoneMk(b.phone);
-    if (phoneA && phoneB && phoneA === phoneB) {
-      return { matched: true, reason: 'phone', score: 0.95 };
-    }
-
-    const emailA = normalizeEmail(a.email);
-    const emailB = normalizeEmail(b.email);
-    if (emailA && emailB && emailA === emailB) {
-      return { matched: true, reason: 'email', score: 0.95 };
-    }
-
-    const addrScore = addressSimilarity(a.address, b.address);
-    const nameScore = nameSimilarity(a.name, b.name);
-    const citiesOk =
-      !a.city || !b.city || a.city.trim().toLowerCase() === b.city.trim().toLowerCase();
-    const tokenOverlap = significantTokenOverlap(a.name, b.name);
-
-    if (addrScore >= 0.55 && tokenOverlap && citiesOk) {
-      return { matched: true, reason: 'address', score: Math.max(addrScore, nameScore) };
-    }
-
-    if (addrScore >= 0.72 && nameScore >= 0.45 && citiesOk) {
-      return { matched: true, reason: 'address', score: addrScore };
-    }
-
-    if (nameScore >= 0.86 && citiesOk) {
-      return { matched: true, reason: 'name', score: nameScore };
-    }
-
-    // Shared distinctive token (e.g. ABC DOOEL ↔ ABC Printing) in same city
-    if (tokenOverlap && citiesOk && nameScore >= 0.35) {
-      return { matched: true, reason: 'name', score: Math.max(nameScore, 0.7) };
-    }
-
-    return { matched: false, score: Math.max(addrScore, nameScore) };
+  match(a: CompanyIdentity, b: CompanyIdentity): MatchResult {
+    return matchCompanyIdentity(a, b);
   }
 
   merge(a: RawCompany, b: RawCompany): RawCompany {

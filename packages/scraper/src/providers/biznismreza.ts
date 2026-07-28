@@ -1,14 +1,18 @@
 import {
   COMPANY_SOURCES,
   Industry,
+  MK_CANONICAL_CITIES,
+  findCityInText,
   type RawCompany,
 } from '@leadhunter/shared';
 import { BaseLeadProvider } from '../base-provider';
 import type { ScrapeContext } from '../types';
 import {
   industryLabels,
+  matchesCityFilter,
   maxCompanies,
   resolveIndustryFilter,
+  resolveTargetCity,
   searchTermsFor,
   shouldStop,
 } from '../provider-utils';
@@ -37,18 +41,23 @@ export class BiznisMrezaProvider extends BaseLeadProvider {
   async scrape(ctx: ScrapeContext): Promise<RawCompany[]> {
     const industries = resolveIndustryFilter(ctx.config);
     const terms = searchTermsFor(industries);
+    const targetCity = resolveTargetCity(ctx.config);
     const http = this.http(ctx);
     const throttle = this.throttle(ctx);
     const results: RawCompany[] = [];
     const seen = new Set<string>();
     const limit = maxCompanies(ctx, 250);
 
-    for (const term of terms) {
+    const searchTerms = targetCity
+      ? terms.flatMap((t) => [`${t} ${targetCity}`, t])
+      : terms;
+
+    for (const term of searchTerms) {
       if (shouldStop(ctx, results.length)) break;
       if (term.length < 3) continue;
       await throttle.wait();
 
-      ctx.logger.info('BiznisMreza search', { term });
+      ctx.logger.info('BiznisMreza search', { term, targetCity });
       try {
         const payload = await http.post<{ d: string }>(
           SMART_SEARCH,
@@ -72,6 +81,9 @@ export class BiznisMrezaProvider extends BaseLeadProvider {
           seen.add(key);
 
           const { city, cleanName } = this.splitNameCity(hit.name);
+          if (targetCity && !matchesCityFilter(city, hit.name, targetCity)) {
+            continue;
+          }
           results.push({
             name: cleanName,
             registrationNumber: String(hit.id),
@@ -105,23 +117,14 @@ export class BiznisMrezaProvider extends BaseLeadProvider {
   }
 
   private splitNameCity(name: string): { cleanName: string; city: string | null } {
-    const cities = [
-      'Скопје',
-      'Битола',
-      'Куманово',
-      'Прилеп',
-      'Тетово',
-      'Велес',
-      'Штип',
-      'Охрид',
-      'Гостивар',
-      'Струмица',
-      'Кавадарци',
-      'Кочани',
-      'Кичево',
-      'Струга',
-    ];
-    for (const city of cities) {
+    const found = findCityInText(name);
+    if (found) {
+      return {
+        cleanName: name.replace(new RegExp(`\\s*${found}\\s*$`), '').trim() || name,
+        city: found,
+      };
+    }
+    for (const city of MK_CANONICAL_CITIES) {
       if (name.includes(city)) {
         return {
           cleanName: name.replace(new RegExp(`\\s*${city}\\s*$`), '').trim() || name,

@@ -1,17 +1,21 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createColumnHelper,
   flexRender,
   getCoreRowModel,
   useReactTable,
 } from '@tanstack/react-table';
-import { INDUSTRY_OPTIONS, MK_CITY_OPTIONS, OUTREACH_STATUSES } from '@leadhunter/shared';
+import {
+  COMPANY_INDUSTRY_OPTIONS_GROUPED,
+  MK_CITY_OPTIONS,
+  OUTREACH_STATUSES,
+} from '@leadhunter/shared';
 import { api } from '@/lib/api';
-import type { CompanyListItem, Paginated } from '@/lib/types';
+import type { CompanyListItem, JobRun, Paginated } from '@/lib/types';
 import { cn, scoreColor } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,7 +25,27 @@ import { Select } from '@/components/ui/select';
 
 const columnHelper = createColumnHelper<CompanyListItem>();
 
+const SOURCES = [
+  { id: 'google-maps', label: 'Google Maps' },
+  { id: 'yellow-pages', label: 'Yellow Pages' },
+  { id: 'companywall', label: 'CompanyWall' },
+  { id: 'business-directory', label: 'Business Directory' },
+  { id: 'biznismreza', label: 'BiznisMreza' },
+  { id: 'google-business', label: 'Google Web' },
+  { id: 'industry-directory', label: 'Industry Directory' },
+];
+
+function isActiveJob(job: JobRun) {
+  return job.status === 'PENDING' || job.status === 'RUNNING' || job.status === 'QUEUED';
+}
+
+function isDiscoveryJob(job: JobRun) {
+  const t = job.type || '';
+  return t.includes('SCRAPE') || t.includes('DISCOVERY');
+}
+
 export default function CompaniesPage() {
+  const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [industry, setIndustry] = useState('');
   const [city, setCity] = useState('');
@@ -33,6 +57,8 @@ export default function CompaniesPage() {
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState('latestLeadScore');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [source, setSource] = useState('google-maps');
+  const [trackedJobId, setTrackedJobId] = useState<string | null>(null);
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -49,11 +75,59 @@ export default function CompaniesPage() {
     params.set('sortBy', sortBy);
     params.set('sortDir', sortDir);
     return params.toString();
-  }, [search, industry, city, hasWebsite, hasEmail, outreachStatus, minScore, maxScore, page, sortBy, sortDir]);
+  }, [
+    search,
+    industry,
+    city,
+    hasWebsite,
+    hasEmail,
+    outreachStatus,
+    minScore,
+    maxScore,
+    page,
+    sortBy,
+    sortDir,
+  ]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['companies', queryString],
     queryFn: () => api.get<Paginated<CompanyListItem>>(`/companies?${queryString}`),
+  });
+
+  const { data: jobs } = useQuery({
+    queryKey: ['jobs'],
+    queryFn: () => api.get<JobRun[]>('/jobs'),
+    refetchInterval: (query) => {
+      const list = query.state.data || [];
+      return list.some(isActiveJob) ? 2000 : 8000;
+    },
+  });
+
+  const activeJob =
+    (trackedJobId && (jobs || []).find((j) => j.id === trackedJobId)) ||
+    (jobs || []).find((j) => isDiscoveryJob(j) && isActiveJob(j)) ||
+    null;
+
+  useEffect(() => {
+    if (!activeJob) return;
+    if (activeJob.status === 'COMPLETED' || activeJob.status === 'FAILED') {
+      void qc.invalidateQueries({ queryKey: ['companies'] });
+      void qc.invalidateQueries({ queryKey: ['dashboard-stats'] });
+    }
+  }, [activeJob?.status, activeJob?.id, qc]);
+
+  const discover = useMutation({
+    mutationFn: () =>
+      api.post<JobRun>(`/jobs/scrape/${source}`, {
+        industry: industry || undefined,
+        city: city || undefined,
+        maxCompaniesPerProvider: 500,
+        runPipeline: true,
+      }),
+    onSuccess: (job) => {
+      if (job?.id) setTrackedJobId(job.id);
+      void qc.invalidateQueries({ queryKey: ['jobs'] });
+    },
   });
 
   const columns = useMemo(
@@ -69,18 +143,29 @@ export default function CompaniesPage() {
       columnHelper.accessor('name', {
         header: 'Company',
         cell: (info) => (
-          <Link className="font-medium text-primary hover:underline" href={`/companies/${info.row.original.id}`}>
+          <Link
+            className="font-medium text-primary hover:underline"
+            href={`/companies/${info.row.original.id}`}
+          >
             {info.getValue()}
           </Link>
         ),
       }),
-      columnHelper.accessor('industry', { header: 'Industry', cell: (i) => i.getValue() || '—' }),
+      columnHelper.accessor('industry', {
+        header: 'Industry',
+        cell: (i) => i.getValue() || '—',
+      }),
       columnHelper.accessor('city', { header: 'City', cell: (i) => i.getValue() || '—' }),
       columnHelper.accessor('website', {
         header: 'Website',
         cell: (i) =>
           i.getValue() ? (
-            <a className="text-sky-400 hover:underline" href={i.getValue()!} target="_blank" rel="noreferrer">
+            <a
+              className="text-sky-400 hover:underline"
+              href={i.getValue()!}
+              target="_blank"
+              rel="noreferrer"
+            >
               Visit
             </a>
           ) : (
@@ -93,7 +178,9 @@ export default function CompaniesPage() {
         id: 'outreach',
         header: 'Outreach',
         cell: (info) => (
-          <Badge variant="secondary">{info.row.original.outreach?.status || 'NOT_CONTACTED'}</Badge>
+          <Badge variant="secondary">
+            {info.row.original.outreach?.status || 'NOT_CONTACTED'}
+          </Badge>
         ),
       }),
     ],
@@ -107,119 +194,180 @@ export default function CompaniesPage() {
     manualPagination: true,
   });
 
+  const industryOptions = COMPANY_INDUSTRY_OPTIONS_GROUPED;
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-display text-3xl font-semibold">Companies</h1>
-        <p className="mt-2 text-muted-foreground">Search, filter, and open opportunities.</p>
+        <p className="mt-2 text-muted-foreground">
+          Filter the list, or discover new companies for the selected industry and city.
+        </p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Filters</CardTitle>
+          <CardTitle className="text-base">Filters & discovery</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
-          <Input
-            placeholder="Search name, email, website…"
-            value={search}
-            onChange={(e) => {
-              setPage(1);
-              setSearch(e.target.value);
-            }}
-          />
-          <Select
-            value={industry}
-            onChange={(e) => {
-              setPage(1);
-              setIndustry(e.target.value);
-            }}
-          >
-            <option value="">All industries</option>
-            {INDUSTRY_OPTIONS.map((i) => (
-              <option key={i.value} value={i.value}>
-                {i.label}
-              </option>
-            ))}
-          </Select>
-          <Select
-            value={city}
-            onChange={(e) => {
-              setPage(1);
-              setCity(e.target.value);
-            }}
-          >
-            <option value="">All cities</option>
-            {MK_CITY_OPTIONS.map((c) => (
-              <option key={c.value} value={c.value}>
-                {c.label}
-              </option>
-            ))}
-          </Select>
-          <Select
-            value={hasWebsite}
-            onChange={(e) => {
-              setPage(1);
-              setHasWebsite(e.target.value);
-            }}
-          >
-            <option value="">Website: any</option>
-            <option value="true">Has website</option>
-            <option value="false">No website</option>
-          </Select>
-          <Select
-            value={hasEmail}
-            onChange={(e) => {
-              setPage(1);
-              setHasEmail(e.target.value);
-            }}
-          >
-            <option value="">Email: any</option>
-            <option value="true">Has email</option>
-            <option value="false">No email</option>
-          </Select>
-          <Select
-            value={outreachStatus}
-            onChange={(e) => {
-              setPage(1);
-              setOutreachStatus(e.target.value);
-            }}
-          >
-            <option value="">Outreach: any</option>
-            {OUTREACH_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </Select>
-          <Input
-            type="number"
-            placeholder="Min score"
-            value={minScore}
-            onChange={(e) => {
-              setPage(1);
-              setMinScore(e.target.value);
-            }}
-          />
-          <Input
-            type="number"
-            placeholder="Max score"
-            value={maxScore}
-            onChange={(e) => {
-              setPage(1);
-              setMaxScore(e.target.value);
-            }}
-          />
-          <Select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
-            <option value="latestLeadScore">Sort: Lead score</option>
-            <option value="name">Sort: Name</option>
-            <option value="city">Sort: City</option>
-            <option value="industry">Sort: Industry</option>
-            <option value="createdAt">Sort: Created</option>
-          </Select>
-          <Select value={sortDir} onChange={(e) => setSortDir(e.target.value as 'asc' | 'desc')}>
-            <option value="desc">Descending</option>
-            <option value="asc">Ascending</option>
-          </Select>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-4">
+            <Input
+              placeholder="Search name, email, website…"
+              value={search}
+              onChange={(e) => {
+                setPage(1);
+                setSearch(e.target.value);
+              }}
+            />
+            <Select
+              value={industry}
+              onChange={(e) => {
+                setPage(1);
+                setIndustry(e.target.value);
+              }}
+            >
+              <option value="">All industries</option>
+              {industryOptions.map((group) => (
+                <optgroup key={group.id} label={group.label}>
+                  {group.options.map((i) => (
+                    <option key={i.value} value={i.value}>
+                      {i.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </Select>
+            <Select
+              value={city}
+              onChange={(e) => {
+                setPage(1);
+                setCity(e.target.value);
+              }}
+            >
+              <option value="">All cities</option>
+              {MK_CITY_OPTIONS.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </Select>
+            <Select
+              value={hasWebsite}
+              onChange={(e) => {
+                setPage(1);
+                setHasWebsite(e.target.value);
+              }}
+            >
+              <option value="">Website: any</option>
+              <option value="true">Has website</option>
+              <option value="false">No website</option>
+            </Select>
+            <Select
+              value={hasEmail}
+              onChange={(e) => {
+                setPage(1);
+                setHasEmail(e.target.value);
+              }}
+            >
+              <option value="">Email: any</option>
+              <option value="true">Has email</option>
+              <option value="false">No email</option>
+            </Select>
+            <Select
+              value={outreachStatus}
+              onChange={(e) => {
+                setPage(1);
+                setOutreachStatus(e.target.value);
+              }}
+            >
+              <option value="">Outreach: any</option>
+              {OUTREACH_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </Select>
+            <Input
+              type="number"
+              placeholder="Min score"
+              value={minScore}
+              onChange={(e) => {
+                setPage(1);
+                setMinScore(e.target.value);
+              }}
+            />
+            <Input
+              type="number"
+              placeholder="Max score"
+              value={maxScore}
+              onChange={(e) => {
+                setPage(1);
+                setMaxScore(e.target.value);
+              }}
+            />
+            <Select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+              <option value="latestLeadScore">Sort: Lead score</option>
+              <option value="name">Sort: Name</option>
+              <option value="city">Sort: City</option>
+              <option value="industry">Sort: Industry</option>
+              <option value="createdAt">Sort: Created</option>
+            </Select>
+            <Select
+              value={sortDir}
+              onChange={(e) => setSortDir(e.target.value as 'asc' | 'desc')}
+            >
+              <option value="desc">Descending</option>
+              <option value="asc">Ascending</option>
+            </Select>
+            <Select value={source} onChange={(e) => setSource(e.target.value)}>
+              {SOURCES.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.label}
+                </option>
+              ))}
+            </Select>
+            <Button
+              className="w-full"
+              disabled={discover.isPending || Boolean(activeJob && isActiveJob(activeJob))}
+              onClick={() => discover.mutate()}
+            >
+              {discover.isPending
+                ? 'Starting…'
+                : activeJob && isActiveJob(activeJob)
+                  ? 'Discovering…'
+                  : 'Discover'}
+            </Button>
+          </div>
+
+          {(activeJob || discover.isError) && (
+            <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2">
+              {activeJob ? (
+                <>
+                  <div className="flex items-center justify-between gap-2 text-sm">
+                    <span className="text-muted-foreground">
+                      {activeJob.type}
+                      {industry ? ` · ${industry}` : ''}
+                      {city ? ` · ${city}` : ''}
+                    </span>
+                    <Badge variant="outline">{activeJob.status}</Badge>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full bg-primary transition-[width] duration-500"
+                      style={{ width: `${Math.min(100, activeJob.progress || 0)}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {activeJob.progress || 0}%
+                    {activeJob.message ? ` · ${activeJob.message}` : ''}
+                  </p>
+                </>
+              ) : null}
+              {discover.isError ? (
+                <p className="text-sm text-rose-400">Failed to start discovery job.</p>
+              ) : null}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -247,7 +395,7 @@ export default function CompaniesPage() {
               ) : table.getRowModel().rows.length === 0 ? (
                 <tr>
                   <td className="px-4 py-8 text-muted-foreground" colSpan={columns.length}>
-                    No companies found. Run <code>npm run scrape</code> or full-scan.
+                    No companies found. Pick industry + city and hit Discover.
                   </td>
                 </tr>
               ) : (

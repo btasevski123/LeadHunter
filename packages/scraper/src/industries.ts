@@ -1,6 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Industry, parseIndustry, type Industry as IndustryType } from '@leadhunter/shared';
+import {
+  Industry,
+  MK_CANONICAL_CITIES,
+  cyrillicToLatinMk,
+  expandBilingualSearchTerms,
+  parseIndustry,
+  type Industry as IndustryType,
+} from '@leadhunter/shared';
 
 export interface IndustryConfig {
   id: string;
@@ -39,12 +46,15 @@ export function loadIndustries(): IndustryConfig[] {
 
 export function loadMkCities(): string[] {
   if (cachedCities) return cachedCities;
+  let fromFile: string[] = [];
   try {
     const raw = readFileSync(join(configDir(), 'mk-cities.json'), 'utf8');
-    cachedCities = JSON.parse(raw) as string[];
+    fromFile = JSON.parse(raw) as string[];
   } catch {
-    cachedCities = ['Скопје', 'Битола', 'Охрид', 'Тетово', 'Прилеп'];
+    fromFile = [];
   }
+  // Always merge shared aliases so smaller towns (e.g. Ресен) are never dropped
+  cachedCities = Array.from(new Set([...MK_CANONICAL_CITIES, ...fromFile]));
   return cachedCities;
 }
 
@@ -56,7 +66,8 @@ export function keywordsForIndustries(industries: IndustryType[]): string[] {
     if (!wanted.has(cfg.id)) continue;
     for (const kw of cfg.keywords) terms.add(kw);
   }
-  return [...terms];
+  // Google Maps MK listings use both scripts — query Cyrillic + Latin forms
+  return expandBilingualSearchTerms([...terms]);
 }
 
 export function resolveIndustriesFromConfig(
@@ -73,12 +84,22 @@ export function resolveIndustriesFromConfig(
 
 export function industryFromKeyword(text: string): IndustryType | null {
   const lower = text.toLowerCase();
+  const latinLower = cyrillicToLatinMk(lower);
+  // Prefer longer keyword matches so "пзу стоматологија" beats bare "пзу"
+  let best: { industry: IndustryType; len: number } | null = null;
   for (const cfg of loadIndustries()) {
-    if (cfg.keywords.some((k) => lower.includes(k.toLowerCase()))) {
-      return (parseIndustry(cfg.id) || (cfg.id as IndustryType)) ?? null;
+    if (cfg.id === 'HOSPITALITY') continue;
+    for (const kw of expandBilingualSearchTerms(cfg.keywords)) {
+      const k = kw.toLowerCase();
+      const kLatin = cyrillicToLatinMk(k);
+      if (!lower.includes(k) && !latinLower.includes(kLatin)) continue;
+      if (!best || k.length > best.len) {
+        const industry = parseIndustry(cfg.id) || (cfg.id as IndustryType);
+        best = { industry, len: k.length };
+      }
     }
   }
-  return null;
+  return best?.industry ?? null;
 }
 
 export { Industry };

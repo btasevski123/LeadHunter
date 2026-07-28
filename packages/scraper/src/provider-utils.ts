@@ -1,6 +1,9 @@
 import {
   Industry,
   INDUSTRY_LABELS,
+  canonicalizeCity,
+  cityFilterVariants,
+  findCityInText,
   parseIndustry,
   type Industry as IndustryType,
 } from '@leadhunter/shared';
@@ -38,6 +41,38 @@ export function resolveCity(config: ProviderConfig): string | undefined {
   return typeof config.city === 'string' && config.city.trim()
     ? config.city.trim()
     : undefined;
+}
+
+/** Canonical target city for scrapers (null = nationwide). */
+export function resolveTargetCity(config: ProviderConfig): string | null {
+  const raw = resolveCity(config);
+  if (!raw) return null;
+  return canonicalizeCity(raw) || raw;
+}
+
+/** True if place belongs to the requested city (Cyrillic/Latin aliases). */
+export function matchesCityFilter(
+  placeCity: string | null | undefined,
+  address: string | null | undefined,
+  targetCity: string,
+): boolean {
+  const variants = cityFilterVariants(targetCity).map((v) => v.toLowerCase());
+  const variantSet = new Set(variants);
+
+  if (placeCity) {
+    const canonical = canonicalizeCity(placeCity);
+    if (canonical && variantSet.has(canonical.toLowerCase())) return true;
+    if (variantSet.has(placeCity.toLowerCase())) return true;
+  }
+
+  if (address) {
+    const fromAddress = findCityInText(address);
+    if (fromAddress && variantSet.has(fromAddress.toLowerCase())) return true;
+    const lower = address.toLowerCase();
+    if (variants.some((v) => lower.includes(v))) return true;
+  }
+
+  return false;
 }
 
 export { Industry, parseIndustry };

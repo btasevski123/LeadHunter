@@ -10,6 +10,7 @@ import type { ScrapeContext } from '../types';
 import {
   maxCompanies,
   resolveIndustryFilter,
+  resolveTargetCity,
   searchTermsFor,
   shouldStop,
 } from '../provider-utils';
@@ -46,21 +47,24 @@ export class GoogleBusinessProvider extends BaseLeadProvider {
   async scrape(ctx: ScrapeContext): Promise<RawCompany[]> {
     const industries = resolveIndustryFilter(ctx.config);
     const terms = searchTermsFor(industries);
+    const targetCity = resolveTargetCity(ctx.config);
     const http = this.http(ctx);
     const throttle = this.throttle(ctx);
     const results: RawCompany[] = [];
     const seen = new Set<string>();
     const limit = maxCompanies(ctx, 120);
 
-    const queries = terms.map((t) => `${t} Македонија`);
+    const queries = targetCity
+      ? terms.flatMap((t) => [`${t} ${targetCity}`, `${t} ${targetCity} Македонија`])
+      : terms.map((t) => `${t} Македонија`);
 
     for (let i = 0; i < queries.length; i++) {
       if (shouldStop(ctx, results.length)) break;
       const query = queries[i]!;
-      const industry = industries[Math.min(i, industries.length - 1)] || Industry.SERVICES;
+      const industry = industries[Math.min(i % Math.max(industries.length, 1), industries.length - 1)] || Industry.SERVICES;
       await throttle.wait();
 
-      ctx.logger.info('Google discovery query', { query });
+      ctx.logger.info('Google discovery query', { query, targetCity });
       try {
         const html = await http.post<string>(
           DDG,
@@ -81,6 +85,7 @@ export class GoogleBusinessProvider extends BaseLeadProvider {
             ...hit,
             industry,
             category: INDUSTRY_LABELS[industry],
+            city: hit.city || targetCity,
             sourceName: COMPANY_SOURCES.GOOGLE_DISCOVERY,
           });
           if (results.length >= limit) break;

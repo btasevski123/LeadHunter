@@ -8,8 +8,10 @@ import { BaseLeadProvider } from '../base-provider';
 import type { ScrapeContext } from '../types';
 import {
   industryLabels,
+  matchesCityFilter,
   maxCompanies,
   resolveIndustryFilter,
+  resolveTargetCity,
   searchTermsFor,
   shouldStop,
 } from '../provider-utils';
@@ -33,6 +35,7 @@ export class CompanyWallProvider extends BaseLeadProvider {
   async scrape(ctx: ScrapeContext): Promise<RawCompany[]> {
     const industries = resolveIndustryFilter(ctx.config);
     const terms = searchTermsFor(industries);
+    const targetCity = resolveTargetCity(ctx.config);
     const http = this.http(ctx);
     const throttle = this.throttle(ctx);
     const results: RawCompany[] = [];
@@ -40,7 +43,11 @@ export class CompanyWallProvider extends BaseLeadProvider {
     const limit = maxCompanies(ctx, 250);
     const maxPagesPerTerm = Number(ctx.config.maxPagesPerTerm || 3);
 
-    for (const term of terms) {
+    const searchTerms = targetCity
+      ? terms.flatMap((t) => [`${t} ${targetCity}`, t])
+      : terms;
+
+    for (const term of searchTerms) {
       if (shouldStop(ctx, results.length)) break;
 
       for (let page = 1; page <= maxPagesPerTerm; page++) {
@@ -48,7 +55,7 @@ export class CompanyWallProvider extends BaseLeadProvider {
         await throttle.wait();
 
         const url = `${BASE}/prebaruvanje?SearchTerm=${encodeURIComponent(term)}&p=${page}`;
-        ctx.logger.info('CompanyWall page', { term, page, url });
+        ctx.logger.info('CompanyWall page', { term, page, url, targetCity });
 
         let html: string;
         try {
@@ -66,6 +73,12 @@ export class CompanyWallProvider extends BaseLeadProvider {
         if (pageCompanies.length === 0) break;
 
         for (const company of pageCompanies) {
+          if (
+            targetCity &&
+            !matchesCityFilter(company.city, company.address, targetCity)
+          ) {
+            continue;
+          }
           const key = company.sourceUrl || company.name;
           if (seen.has(key)) continue;
           seen.add(key);

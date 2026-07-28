@@ -2,44 +2,89 @@ import {
   COMPANY_SOURCES,
   Industry,
   INDUSTRY_LABELS,
+  canonicalizeCity,
+  citySearchTerms,
+  findCityInText,
   type RawCompany,
 } from '@leadhunter/shared';
 import { BaseLeadProvider } from '../../base-provider';
 import type { ScrapeContext } from '../../types';
-import { maxCompanies, resolveIndustryFilter, shouldStop } from '../../provider-utils';
-import { industryFromKeyword, keywordsForIndustries, loadMkCities } from '../../industries';
+import {
+  matchesCityFilter,
+  maxCompanies,
+  resolveIndustryFilter,
+  shouldStop,
+} from '../../provider-utils';
+import {
+  industryFromKeyword,
+  keywordsForIndustries,
+  loadIndustries,
+  loadMkCities,
+} from '../../industries';
+import { cityGeo } from './city-geo';
+import {
+  CITY_SWEEP_PLACE_TYPES,
+  industryFromPlaceType,
+  placeTypesForIndustries,
+} from './place-types';
 
 const PLACES_SEARCH = 'https://places.googleapis.com/v1/places:searchText';
+const PLACES_NEARBY = 'https://places.googleapis.com/v1/places:searchNearby';
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 
+const FIELD_MASK = [
+  'places.id',
+  'places.displayName',
+  'places.formattedAddress',
+  'places.nationalPhoneNumber',
+  'places.internationalPhoneNumber',
+  'places.websiteUri',
+  'places.googleMapsUri',
+  'places.rating',
+  'places.userRatingCount',
+  'places.primaryTypeDisplayName',
+  'places.primaryType',
+  'places.businessStatus',
+  'places.regularOpeningHours',
+  'places.photos',
+  'places.addressComponents',
+  'places.location',
+  'nextPageToken',
+].join(',');
+
 interface PlacesTextResult {
-  places?: Array<{
-    id?: string;
-    displayName?: { text?: string };
-    formattedAddress?: string;
-    nationalPhoneNumber?: string;
-    internationalPhoneNumber?: string;
-    websiteUri?: string;
-    googleMapsUri?: string;
-    rating?: number;
-    userRatingCount?: number;
-    primaryTypeDisplayName?: { text?: string };
-    businessStatus?: string;
-    regularOpeningHours?: { weekdayDescriptions?: string[] };
-    photos?: Array<{ name?: string }>;
-    addressComponents?: Array<{ longText?: string; types?: string[] }>;
-  }>;
+  places?: PlaceRow[];
   nextPageToken?: string;
+}
+
+interface PlaceRow {
+  id?: string;
+  displayName?: { text?: string };
+  formattedAddress?: string;
+  nationalPhoneNumber?: string;
+  internationalPhoneNumber?: string;
+  websiteUri?: string;
+  googleMapsUri?: string;
+  rating?: number;
+  userRatingCount?: number;
+  primaryTypeDisplayName?: { text?: string };
+  primaryType?: string;
+  businessStatus?: string;
+  regularOpeningHours?: { weekdayDescriptions?: string[] };
+  photos?: Array<{ name?: string }>;
+  addressComponents?: Array<{ longText?: string; types?: string[] }>;
+  location?: { latitude?: number; longitude?: number };
 }
 
 /**
  * Google Maps / Places discovery for North Macedonia businesses.
  *
- * Primary: Google Places API (New) Text Search when GOOGLE_PLACES_API_KEY
- * (or GOOGLE_MAPS_API_KEY) is set.
+ * City-scoped mode (recommended): exhausts Maps coverage for one town via
+ *  1) bilingual keyword × city text search (no national flood)
+ *  2) Nearby Search by Google place types around city center
+ *  3) strict post-filter so only places in the target city are kept
  *
- * Fallback: OpenStreetMap Nominatim (public, rate-limited) so local/dev
- * environments still discover real MK businesses without a paid key.
+ * Without city: broader national keyword search (legacy / volume mode).
  */
 export class GoogleMapsProvider extends BaseLeadProvider {
   readonly id = 'google-maps';
@@ -52,9 +97,20 @@ export class GoogleMapsProvider extends BaseLeadProvider {
   }
 
   async scrape(ctx: ScrapeContext): Promise<RawCompany[]> {
-    const industries = resolveIndustryFilter(ctx.config);
-    const keywords = keywordsForIndustries(industries);
-    const cities = this.resolveCities(ctx);
+    const industries = resolveIndustryFilter(ctx.config).filter(
+      (i) => i !== Industry.HOSPITALITY,
+    );
+    const targetCity =
+      typeof ctx.config.city === 'string' && ctx.config.city.trim()
+        ? canonicalizeCity(ctx.config.city.trim()) || ctx.config.city.trim()
+        : null;
+    const cityScoped = Boolean(targetCity);
+    // Multi-industry city scrape: compact keywords (Nearby does the heavy lifting)
+    const multiIndustry = cityScoped && industries.length > 1;
+    const keywords = multiIndustry
+      ? this.compactKeywords(industries)
+      : keywordsForIndustries(industries);
+    const cities = this.resolveCities(ctx, targetCity, multiIndustry);
     const limit = maxCompanies(ctx, 2000);
     const apiKey =
       process.env.GOOGLE_PLACES_API_KEY ||
@@ -63,40 +119,82 @@ export class GoogleMapsProvider extends BaseLeadProvider {
         ? ctx.config.googlePlacesApiKey
         : undefined);
 
-    const queries = this.buildQueries(keywords, cities, industries);
+    const queries = this.buildQueries(
+      keywords,
+      cities,
+      industries,
+      cityScoped,
+      multiIndustry,
+    );
     ctx.logger.info('Google Maps discovery starting', {
       queries: queries.length,
+      industries: industries.length,
+      multiIndustry,
+      targetCity,
       mode: apiKey ? 'places-api' : 'nominatim-fallback',
       limit,
     });
 
     if (apiKey) {
-      return this.scrapePlacesApi(ctx, queries, industries, apiKey, limit);
+      return this.scrapePlacesApi(
+        ctx,
+        queries,
+        industries,
+        apiKey,
+        limit,
+        targetCity,
+        multiIndustry,
+      );
     }
 
     ctx.logger.warn(
       'GOOGLE_PLACES_API_KEY not set — using OpenStreetMap Nominatim fallback for MK discovery',
     );
-    return this.scrapeNominatim(ctx, queries, industries, limit);
+    return this.scrapeNominatim(ctx, queries, industries, limit, targetCity);
   }
 
-  private resolveCities(ctx: ScrapeContext): string[] {
-    if (typeof ctx.config.city === 'string' && ctx.config.city.trim()) {
-      return [ctx.config.city.trim()];
+  /** One primary MK keyword per industry — used for fast multi-industry city sweeps. */
+  private compactKeywords(industries: Industry[]): string[] {
+    const wanted = new Set(industries.map(String));
+    const terms: string[] = [];
+    for (const cfg of loadIndustries()) {
+      if (!wanted.has(cfg.id) || cfg.id === 'HOSPITALITY') continue;
+      const primary =
+        cfg.keywords.find((k) => /[\u0400-\u04FF]/.test(k)) || cfg.keywords[0];
+      if (primary) terms.push(primary);
+    }
+    return terms;
+  }
+
+  private resolveCities(
+    ctx: ScrapeContext,
+    targetCity: string | null,
+    multiIndustry = false,
+  ): string[] {
+    if (targetCity) {
+      // Multi-industry: one city spelling is enough (Nearby + compact keywords)
+      if (multiIndustry) return [targetCity];
+      return citySearchTerms(targetCity);
     }
     const all = loadMkCities();
-    // Scale mode: search major cities; narrow when industry-filtered
     const industries = resolveIndustryFilter(ctx.config);
-    if (industries.length === 1) return all;
-    return all.slice(0, 8);
+    const base = industries.length === 1 ? all : all.slice(0, 8);
+    return Array.from(new Set(base.flatMap((c) => citySearchTerms(c))));
   }
 
+  /**
+   * When city is set: ONLY city-scoped queries (national floods drowned Resen before).
+   * Multi-industry city: skip includedType text fan-out (Nearby covers types).
+   * Single industry city: full bilingual + type-anchored text search.
+   */
   private buildQueries(
     keywords: string[],
     cities: string[],
     industries: Industry[],
-  ): Array<{ query: string; industry: Industry }> {
-    const out: Array<{ query: string; industry: Industry }> = [];
+    cityScoped: boolean,
+    multiIndustry: boolean,
+  ): Array<{ query: string; industry: Industry; includedType?: string }> {
+    const out: Array<{ query: string; industry: Industry; includedType?: string }> = [];
     const industryList = industries.length ? industries : [Industry.SERVICES];
 
     for (let i = 0; i < keywords.length; i++) {
@@ -106,42 +204,156 @@ export class GoogleMapsProvider extends BaseLeadProvider {
         industryList[Math.min(i, industryList.length - 1)] ||
         Industry.SERVICES;
 
-      // National + city-scoped queries for volume
-      out.push({ query: `${kw} Македонија`, industry });
-      for (const city of cities) {
-        out.push({ query: `${kw} ${city}`, industry });
+      if (cityScoped) {
+        for (const city of cities) {
+          out.push({ query: `${kw} ${city}`, industry });
+        }
+      } else {
+        for (const country of ['Македонија', 'Macedonia', 'Makedonija']) {
+          out.push({ query: `${kw} ${country}`, industry });
+        }
+        for (const city of cities) {
+          out.push({ query: `${kw} ${city}`, industry });
+        }
       }
     }
 
-    // Deduplicate query strings
+    // Type-anchored text only for focused single-industry city scrapes
+    if (cityScoped && !multiIndustry) {
+      const types = placeTypesForIndustries(industryList);
+      const primaryCity = cities[0];
+      if (primaryCity) {
+        for (const type of types) {
+          const industry =
+            industryList.find((ind) =>
+              placeTypesForIndustries([ind]).includes(type),
+            ) || industryList[0]!;
+          out.push({ query: primaryCity, industry, includedType: type });
+          for (const alias of cities.slice(1)) {
+            out.push({ query: alias, industry, includedType: type });
+          }
+        }
+      }
+    }
+
     const seen = new Set<string>();
     return out.filter((q) => {
-      if (seen.has(q.query)) return false;
-      seen.add(q.query);
+      const key = `${q.query}|${q.includedType || ''}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
     });
   }
 
   private async scrapePlacesApi(
     ctx: ScrapeContext,
-    queries: Array<{ query: string; industry: Industry }>,
+    queries: Array<{ query: string; industry: Industry; includedType?: string }>,
     industries: Industry[],
     apiKey: string,
     limit: number,
+    targetCity: string | null,
+    multiIndustry = false,
   ): Promise<RawCompany[]> {
     const http = this.http(ctx);
     const throttle = this.throttle(ctx);
     const results: RawCompany[] = [];
     const seenPlaces = new Set<string>();
 
-    for (const { query, industry } of queries) {
-      if (shouldStop(ctx, results.length)) break;
+    const pushPlace = (place: PlaceRow, industry: Industry) => {
+      if (shouldStop(ctx, results.length) || results.length >= limit) return false;
+      const placeId = place.id || null;
+      if (placeId && seenPlaces.has(placeId)) return true;
+      if (placeId) seenPlaces.add(placeId);
+
+      const name = place.displayName?.text?.trim();
+      if (!name) return true;
+
+      const city =
+        canonicalizeCity(this.cityFromComponents(place.addressComponents)) ||
+        findCityInText(place.formattedAddress);
+
+      if (targetCity && !matchesCityFilter(city, place.formattedAddress, targetCity)) {
+        return true;
+      }
+
+      const resolvedIndustry = industryFromPlaceType(place.primaryType, industry);
+      results.push(this.toRawCompany(place, resolvedIndustry, city));
+      return true;
+    };
+
+    const runNearby = async () => {
+      if (!targetCity || results.length >= limit) return;
+      const geo = cityGeo(targetCity);
+      if (!geo) return;
+      const types =
+        industries.length > 0
+          ? placeTypesForIndustries(industries)
+          : CITY_SWEEP_PLACE_TYPES;
+
+      for (let i = 0; i < types.length; i += 5) {
+        if (shouldStop(ctx, results.length) || results.length >= limit) break;
+        const batch = types.slice(i, i + 5);
+        await throttle.wait();
+        ctx.logger.info('Places nearby search', { targetCity, types: batch });
+
+        try {
+          const data = await http.post<{ places?: PlaceRow[] }>(
+            PLACES_NEARBY,
+            {
+              includedTypes: batch,
+              maxResultCount: 20,
+              languageCode: 'mk',
+              regionCode: 'MK',
+              locationRestriction: {
+                circle: {
+                  center: { latitude: geo.lat, longitude: geo.lng },
+                  radius: geo.radiusM,
+                },
+              },
+            },
+            {
+              headers: {
+                'Content-Type': 'application/json',
+                'X-Goog-Api-Key': apiKey,
+                'X-Goog-FieldMask': FIELD_MASK.replace(',nextPageToken', ''),
+              },
+            },
+          );
+
+          const fallbackIndustry =
+            industries.find((ind) =>
+              batch.some((t) => placeTypesForIndustries([ind]).includes(t)),
+            ) ||
+            industries[0] ||
+            Industry.SERVICES;
+
+          for (const place of data.places || []) {
+            if (!pushPlace(place, fallbackIndustry)) break;
+          }
+        } catch (err) {
+          ctx.logger.warn('Places nearby failed', {
+            types: batch,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    };
+
+    // Multi-industry city: Nearby first (fast broad coverage), then compact text queries
+    if (multiIndustry) {
+      await runNearby();
+    }
+
+    const maxPages = multiIndustry ? 1 : targetCity ? 4 : 3;
+
+    for (const { query, industry, includedType } of queries) {
+      if (shouldStop(ctx, results.length) || results.length >= limit) break;
       let pageToken: string | undefined;
 
-      for (let page = 0; page < 3; page++) {
-        if (shouldStop(ctx, results.length)) break;
+      for (let page = 0; page < maxPages; page++) {
+        if (shouldStop(ctx, results.length) || results.length >= limit) break;
         await throttle.wait();
-        ctx.logger.info('Places text search', { query, page });
+        ctx.logger.info('Places text search', { query, includedType, page, targetCity });
 
         try {
           const body: Record<string, unknown> = {
@@ -150,72 +362,29 @@ export class GoogleMapsProvider extends BaseLeadProvider {
             regionCode: 'MK',
             pageSize: 20,
           };
+          if (includedType) body.includedType = includedType;
           if (pageToken) body.pageToken = pageToken;
+
+          const geo = targetCity ? cityGeo(targetCity) : null;
+          if (geo) {
+            body.locationBias = {
+              circle: {
+                center: { latitude: geo.lat, longitude: geo.lng },
+                radius: geo.radiusM,
+              },
+            };
+          }
 
           const data = await http.post<PlacesTextResult>(PLACES_SEARCH, body, {
             headers: {
               'Content-Type': 'application/json',
               'X-Goog-Api-Key': apiKey,
-              'X-Goog-FieldMask': [
-                'places.id',
-                'places.displayName',
-                'places.formattedAddress',
-                'places.nationalPhoneNumber',
-                'places.internationalPhoneNumber',
-                'places.websiteUri',
-                'places.googleMapsUri',
-                'places.rating',
-                'places.userRatingCount',
-                'places.primaryTypeDisplayName',
-                'places.businessStatus',
-                'places.regularOpeningHours',
-                'places.photos',
-                'places.addressComponents',
-                'nextPageToken',
-              ].join(','),
+              'X-Goog-FieldMask': FIELD_MASK,
             },
           });
 
           for (const place of data.places || []) {
-            const placeId = place.id || null;
-            if (placeId && seenPlaces.has(placeId)) continue;
-            if (placeId) seenPlaces.add(placeId);
-
-            const name = place.displayName?.text?.trim();
-            if (!name) continue;
-
-            const city = this.cityFromComponents(place.addressComponents) ||
-              this.cityFromAddress(place.formattedAddress);
-
-            results.push({
-              name,
-              industry,
-              category: place.primaryTypeDisplayName?.text || INDUSTRY_LABELS[industry],
-              address: place.formattedAddress || null,
-              city,
-              phone:
-                place.nationalPhoneNumber || place.internationalPhoneNumber || null,
-              website: place.websiteUri || null,
-              googlePlaceId: placeId,
-              googleMapsUrl:
-                place.googleMapsUri ||
-                (placeId
-                  ? `https://www.google.com/maps/place/?q=place_id:${placeId}`
-                  : null),
-              googleRating: place.rating ?? null,
-              googleReviewsCount: place.userRatingCount ?? null,
-              googleCategory: place.primaryTypeDisplayName?.text || null,
-              googleBusinessStatus: place.businessStatus || null,
-              googleOpeningHours: place.regularOpeningHours?.weekdayDescriptions || null,
-              googlePhotos: (place.photos || [])
-                .slice(0, 5)
-                .map((p) => p.name)
-                .filter(Boolean),
-              sourceName: COMPANY_SOURCES.GOOGLE_MAPS,
-              sourceUrl: place.googleMapsUri || null,
-            });
-
-            if (results.length >= limit) break;
+            if (!pushPlace(place, industry)) break;
           }
 
           pageToken = data.nextPageToken;
@@ -223,6 +392,7 @@ export class GoogleMapsProvider extends BaseLeadProvider {
         } catch (err) {
           ctx.logger.warn('Places search failed', {
             query,
+            includedType,
             error: err instanceof Error ? err.message : String(err),
           });
           break;
@@ -230,7 +400,51 @@ export class GoogleMapsProvider extends BaseLeadProvider {
       }
     }
 
+    // Single-industry city: Nearby after text (fills type gaps keywords miss)
+    if (!multiIndustry) {
+      await runNearby();
+    }
+
+    ctx.logger.info('Google Maps discovery finished', {
+      targetCity,
+      multiIndustry,
+      kept: results.length,
+      seenUnique: seenPlaces.size,
+    });
+
     return results.slice(0, limit);
+  }
+
+  private toRawCompany(
+    place: PlaceRow,
+    industry: Industry,
+    city: string | null,
+  ): RawCompany {
+    const placeId = place.id || null;
+    return {
+      name: place.displayName?.text?.trim() || '',
+      industry,
+      category: place.primaryTypeDisplayName?.text || INDUSTRY_LABELS[industry],
+      address: place.formattedAddress || null,
+      city,
+      phone: place.nationalPhoneNumber || place.internationalPhoneNumber || null,
+      website: place.websiteUri || null,
+      googlePlaceId: placeId,
+      googleMapsUrl:
+        place.googleMapsUri ||
+        (placeId ? `https://www.google.com/maps/place/?q=place_id:${placeId}` : null),
+      googleRating: place.rating ?? null,
+      googleReviewsCount: place.userRatingCount ?? null,
+      googleCategory: place.primaryTypeDisplayName?.text || place.primaryType || null,
+      googleBusinessStatus: place.businessStatus || null,
+      googleOpeningHours: place.regularOpeningHours?.weekdayDescriptions || null,
+      googlePhotos: (place.photos || [])
+        .slice(0, 5)
+        .map((p) => p.name)
+        .filter(Boolean) as string[],
+      sourceName: COMPANY_SOURCES.GOOGLE_MAPS,
+      sourceUrl: place.googleMapsUri || null,
+    };
   }
 
   private async scrapeNominatim(
@@ -238,13 +452,13 @@ export class GoogleMapsProvider extends BaseLeadProvider {
     queries: Array<{ query: string; industry: Industry }>,
     _industries: Industry[],
     limit: number,
+    targetCity: string | null,
   ): Promise<RawCompany[]> {
     const http = this.http(ctx);
     const throttle = this.throttle(ctx);
     const results: RawCompany[] = [];
     const seen = new Set<string>();
 
-    // Nominatim requires a descriptive UA and low request volume
     for (const { query, industry } of queries.slice(0, 40)) {
       if (shouldStop(ctx, results.length)) break;
       await throttle.wait();
@@ -293,11 +507,17 @@ export class GoogleMapsProvider extends BaseLeadProvider {
           seen.add(key);
 
           const city =
-            row.address?.city ||
-            row.address?.town ||
-            row.address?.municipality ||
-            row.address?.village ||
-            null;
+            canonicalizeCity(
+              row.address?.city ||
+                row.address?.town ||
+                row.address?.municipality ||
+                row.address?.village ||
+                null,
+            ) || findCityInText(row.display_name);
+
+          if (targetCity && !matchesCityFilter(city, row.display_name, targetCity)) {
+            continue;
+          }
 
           const mapsUrl =
             row.lat && row.lon
@@ -341,14 +561,5 @@ export class GoogleMapsProvider extends BaseLeadProvider {
       c.types?.some((t) => t === 'locality' || t === 'postal_town'),
     );
     return city?.longText || null;
-  }
-
-  private cityFromAddress(address?: string): string | null {
-    if (!address) return null;
-    const cities = loadMkCities();
-    for (const city of cities) {
-      if (address.includes(city)) return city;
-    }
-    return null;
   }
 }

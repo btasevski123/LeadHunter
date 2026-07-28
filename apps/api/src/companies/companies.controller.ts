@@ -25,6 +25,11 @@ export class CompaniesController {
     return this.companies.topLeads(Number(limit || 50));
   }
 
+  @Post('dedupe')
+  dedupe() {
+    return this.companies.dedupeExistingCompanies();
+  }
+
   @Get(':id')
   async get(@Param('id') id: string) {
     const company = await this.companies.getById(id);
@@ -45,5 +50,10 @@ export class CompaniesController {
   @Post(':id/audit')
   auditOne(@Param('id') id: string) {
     return this.companies.auditOne(id);
+  }
+
+  @Post(':id/classify')
+  classify(@Param('id') id: string) {
+    return this.companies.classifyOne(id);
   }
 }

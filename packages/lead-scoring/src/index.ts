@@ -171,3 +171,20 @@ export function scoreBandLabel(score: number): string {
   if (score >= 40) return 'Medium';
   return 'Low';
 }
+
+export {
+  classifyCompany,
+  computeDesignScore,
+  computeSeoScore,
+  buildCategoryHaystack,
+  matchesBookingCategory,
+  matchesEcommerceCategory,
+  matchesCustomSoftwareCategory,
+  CLASSIFICATION_RULES,
+} from './classification';
+export type {
+  ClassificationRule,
+  ClassificationRuleContext,
+  ClassificationRuleMatch,
+} from './classification';
+

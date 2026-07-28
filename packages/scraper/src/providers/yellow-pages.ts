@@ -2,14 +2,16 @@ import * as cheerio from 'cheerio';
 import {
   COMPANY_SOURCES,
   Industry,
+  canonicalizeCity,
   type RawCompany,
 } from '@leadhunter/shared';
 import { BaseLeadProvider } from '../base-provider';
 import type { ScrapeContext } from '../types';
 import {
-  industryLabels,
+  matchesCityFilter,
   maxCompanies,
   resolveIndustryFilter,
+  resolveTargetCity,
   shouldStop,
 } from '../provider-utils';
 
@@ -25,11 +27,16 @@ export const YELLOW_PAGES_CATEGORIES: { slug: string; label: string; industry: I
   { slug: 'МЕТАЛНА_ИНДУСТРИЈА', label: 'Метална индустрија', industry: Industry.METAL_INDUSTRY },
   { slug: 'АВТО_СЕРВИСИ', label: 'Авто сервиси', industry: Industry.AUTOMOTIVE },
   { slug: 'СТОМАТОЛОГИЈА', label: 'Стоматологија', industry: Industry.DENTAL },
+  { slug: 'ЗДРАВСТВО', label: 'Здравство / ПЗУ', industry: Industry.HEALTHCARE },
+  { slug: 'ПРИВАТНИ_ЗДРАВСТВЕНИ_УСТАНОВИ', label: 'ПЗУ', industry: Industry.HEALTHCARE },
   { slug: 'АДВОКАТИ', label: 'Адвокати', industry: Industry.LEGAL },
   { slug: 'СМЕТКОВОДСТВO', label: 'Сметководство', industry: Industry.ACCOUNTING },
   { slug: 'СМЕТКОВОДСТВО', label: 'Сметководство', industry: Industry.ACCOUNTING },
-  { slug: 'ХОТЕЛИ', label: 'Хотели', industry: Industry.HOSPITALITY },
-  { slug: 'РЕСТОРАНИ', label: 'Ресторани', industry: Industry.HOSPITALITY },
+  { slug: 'ХОТЕЛИ', label: 'Хотели', industry: Industry.LODGING },
+  { slug: 'РЕСТОРАНИ', label: 'Ресторани', industry: Industry.FOOD_BEVERAGE },
+  { slug: 'КАФЕАНИ', label: 'Кафеани', industry: Industry.FOOD_BEVERAGE },
+  { slug: 'ФИТНЕС', label: 'Фитнес', industry: Industry.FITNESS },
+  { slug: 'ТЕРЕТАНИ', label: 'Теретани', industry: Industry.FITNESS },
   { slug: 'ТУРИЗАМ', label: 'Туризам', industry: Industry.TOURISM },
   { slug: 'ТРГОВИЈА', label: 'Трговија', industry: Industry.RETAIL },
 ];
@@ -49,6 +56,7 @@ export class YellowPagesProvider extends BaseLeadProvider {
 
   async scrape(ctx: ScrapeContext): Promise<RawCompany[]> {
     const industries = new Set(resolveIndustryFilter(ctx.config));
+    const targetCity = resolveTargetCity(ctx.config);
     const categories = YELLOW_PAGES_CATEGORIES.filter((c) => industries.has(c.industry));
     const http = this.http(ctx);
     const throttle = this.throttle(ctx);
@@ -63,7 +71,7 @@ export class YellowPagesProvider extends BaseLeadProvider {
       await throttle.wait();
 
       const url = `${BASE}/kategorija/${encodeURIComponent(category.slug)}`;
-      ctx.logger.info('Yellow Pages category', { category: category.label, url });
+      ctx.logger.info('Yellow Pages category', { category: category.label, url, targetCity });
 
       let html: string;
       try {
@@ -78,6 +86,12 @@ export class YellowPagesProvider extends BaseLeadProvider {
 
       const companies = this.parseCategoryTable(html, category.industry, category.label);
       for (const company of companies) {
+        if (
+          targetCity &&
+          !matchesCityFilter(company.city, company.address, targetCity)
+        ) {
+          continue;
+        }
         const key =
           company.sourceUrl ||
           `${company.name}|${company.phone || ''}|${company.city || ''}`.toLowerCase();
@@ -158,18 +172,6 @@ function cleanWebsite(raw?: string | null): string | null {
 }
 
 function titleCaseCity(city: string): string {
-  const map: Record<string, string> = {
-    СКОПЈЕ: 'Скопје',
-    БИТОЛА: 'Битола',
-    КУМАНОВО: 'Куманово',
-    ПРИЛЕП: 'Прилеп',
-    ТЕТОВО: 'Тетово',
-    ВЕЛЕС: 'Велес',
-    ШТИП: 'Штип',
-    ОХРИД: 'Охрид',
-    ГОСТИВАР: 'Гостивар',
-    СТРУМИЦА: 'Струмица',
-  };
-  return map[city.toUpperCase()] || city;
+  return canonicalizeCity(city) || city;
 }
 

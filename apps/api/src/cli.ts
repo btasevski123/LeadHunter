@@ -26,6 +26,11 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { JobsService } from './jobs/jobs.service';
+import { CompaniesService } from './companies/companies.service';
+import {
+  DedupeAuditService,
+  formatDedupeAuditReport,
+} from './companies/dedupe-audit.service';
 
 function argValue(flag: string): string | undefined {
   const idx = process.argv.findIndex((a) => a === flag || a.startsWith(`${flag}=`));
@@ -54,6 +59,7 @@ async function main() {
     logger: ['error', 'warn', 'log'],
   });
   const jobs = app.get(JobsService);
+  const companies = app.get(CompaniesService);
 
   const scrapeOpts = {
     industry,
@@ -134,6 +140,20 @@ async function main() {
         console.log(await jobs.runExportSync(format));
         break;
       }
+      case 'dedupe':
+        console.log(await companies.dedupeExistingCompanies());
+        break;
+      case 'dedupe:audit': {
+        const report = await app.get(DedupeAuditService).run({
+          sampleSize: argValue('--samples') ? Number(argValue('--samples')) : undefined,
+        });
+        if (hasFlag('--json')) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(formatDedupeAuditReport(report));
+        }
+        break;
+      }
       case 'full-scan':
         console.log(await jobs.runFullScanSync(scrapeOpts));
         break;
@@ -141,7 +161,7 @@ async function main() {
         console.log(`LeadHunter MK CLI
 
 Commands:
-  scrape | scrape:all [--industry=PRINTING] [--city=Скопје] [--max=2000] [--skip-pipeline]
+  scrape | scrape:all [--industry=PRINTING|HEALTHCARE|FOOD_BEVERAGE|LODGING|FITNESS|DENTAL|…] [--city=Скопје] [--max=2000] [--skip-pipeline]
   scrape:companywall
   scrape:biznismreza
   scrape:yellow-pages
@@ -149,6 +169,8 @@ Commands:
   discover:google | scrape:google-maps
   scrape:industry-directory
   normalize
+  dedupe
+  dedupe:audit [--samples=25] [--json]   read-only dedupe health report
   audit [limit]
   screenshots [limit]
   discover-contacts [limit]

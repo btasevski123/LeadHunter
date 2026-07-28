@@ -28,6 +28,40 @@ describe('company normalizer', () => {
     assert.equal(companies[0]!.googlePlaceId, 'places/abc');
   });
 
+  it('canonicalizes the city so sources using different scripts agree', () => {
+    assert.equal(companyNormalizer.normalize({ name: 'A', city: 'Shkupi' }).city, 'Скопје');
+    assert.equal(companyNormalizer.normalize({ name: 'A', city: 'Koçani' }).city, 'Кочани');
+    assert.equal(companyNormalizer.normalize({ name: 'A', city: 'br:98' }).city, null);
+  });
+
+  it('merges one company reported under two spellings of the same city', () => {
+    const { companies } = companyNormalizer.dedupe([
+      { name: 'Печатница Европа 92', city: 'Koçani', sourceName: COMPANY_SOURCES.GOOGLE_MAPS },
+      { name: 'Печатница Европа 92', city: 'Кочани', sourceName: COMPANY_SOURCES.YELLOW_PAGES },
+    ]);
+    assert.equal(companies.length, 1);
+    assert.equal(companies[0]!.city, 'Кочани');
+  });
+
+  it('keeps two businesses that both list a Facebook page as separate companies', () => {
+    const { companies, duplicatesRemoved } = companyNormalizer.dedupe([
+      {
+        name: 'Стоматологија Орхидеја',
+        city: 'Скопје',
+        website: 'https://facebook.com/orhideja',
+        sourceName: COMPANY_SOURCES.YELLOW_PAGES,
+      },
+      {
+        name: 'Печатница Гутенберг',
+        city: 'Скопје',
+        website: 'https://facebook.com/gutenberg',
+        sourceName: COMPANY_SOURCES.YELLOW_PAGES,
+      },
+    ]);
+    assert.equal(companies.length, 2);
+    assert.equal(duplicatesRemoved, 0);
+  });
+
   it('matches by address similarity', () => {
     const match = companyNormalizer.match(
       { name: 'Печатница Сонце', address: 'Partizanski Odredi 15, Skopje', city: 'Skopje' },

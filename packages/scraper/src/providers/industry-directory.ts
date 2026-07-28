@@ -8,8 +8,10 @@ import {
 import { BaseLeadProvider } from '../base-provider';
 import type { ScrapeContext } from '../types';
 import {
+  matchesCityFilter,
   maxCompanies,
   resolveIndustryFilter,
+  resolveTargetCity,
   shouldStop,
 } from '../provider-utils';
 import { YELLOW_PAGES_CATEGORIES } from './yellow-pages';
@@ -38,6 +40,7 @@ export class IndustryDirectoryProvider extends BaseLeadProvider {
 
   async scrape(ctx: ScrapeContext): Promise<RawCompany[]> {
     const wanted = new Set(resolveIndustryFilter(ctx.config));
+    const targetCity = resolveTargetCity(ctx.config);
     const categories = YELLOW_PAGES_CATEGORIES.filter(
       (c) => this.industries.includes(c.industry) && wanted.has(c.industry),
     );
@@ -85,13 +88,17 @@ export class IndustryDirectoryProvider extends BaseLeadProvider {
         seen.add(key);
 
         const websiteRaw = cells[5] || null;
+        const city = cells[3] || null;
+        const address = cells[2] || null;
+        if (targetCity && !matchesCityFilter(city, address, targetCity)) return;
+
         results.push({
           name,
           industry: category.industry,
           category: category.label,
           phone: cells[1] || null,
-          address: cells[2] || null,
-          city: cells[3] || null,
+          address,
+          city,
           email: cells[4]?.includes('@') ? cells[4] : null,
           website: websiteRaw?.startsWith('www.') ? `https://${websiteRaw}` : websiteRaw,
           sourceUrl,

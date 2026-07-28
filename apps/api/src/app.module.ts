@@ -11,6 +11,7 @@ import { StorageModule } from './storage/storage.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ImportsModule } from './imports/imports.module';
 import { SourcesModule } from './sources/sources.module';
+import { ClassificationModule } from './classification/classification.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { SourcesModule } from './sources/sources.module';
     StorageModule,
     ImportsModule,
     SourcesModule,
+    ClassificationModule,
   ],
 })
 export class AppModule {}

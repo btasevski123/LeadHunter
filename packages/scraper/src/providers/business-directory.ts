@@ -8,12 +8,13 @@ import {
 import { BaseLeadProvider } from '../base-provider';
 import type { ScrapeContext } from '../types';
 import {
+  matchesCityFilter,
   maxCompanies,
   resolveIndustryFilter,
+  resolveTargetCity,
   shouldStop,
 } from '../provider-utils';
 import { YELLOW_PAGES_CATEGORIES } from './yellow-pages';
-import { loadMkCities } from '../industries';
 
 /**
  * Broad business directory discovery across targeted MK categories.
@@ -31,6 +32,7 @@ export class BusinessDirectoryProvider extends BaseLeadProvider {
 
   async scrape(ctx: ScrapeContext): Promise<RawCompany[]> {
     const industries = new Set(resolveIndustryFilter(ctx.config));
+    const targetCity = resolveTargetCity(ctx.config);
     const categories = YELLOW_PAGES_CATEGORIES.filter((c) => industries.has(c.industry));
     const http = this.http(ctx);
     const throttle = this.throttle(ctx);
@@ -38,15 +40,17 @@ export class BusinessDirectoryProvider extends BaseLeadProvider {
     const seen = new Set<string>();
     const limit = maxCompanies(ctx, 5000);
     const base = 'https://yellowpages.com.mk';
-    const cityFilter =
-      typeof ctx.config.city === 'string' ? ctx.config.city.trim() : '';
 
     for (const category of categories.length ? categories : YELLOW_PAGES_CATEGORIES) {
       if (shouldStop(ctx, results.length)) break;
       await throttle.wait();
 
       const url = `${base}/kategorija/${encodeURIComponent(category.slug)}`;
-      ctx.logger.info('Business directory category', { category: category.label, url });
+      ctx.logger.info('Business directory category', {
+        category: category.label,
+        url,
+        targetCity,
+      });
 
       let html: string;
       try {
@@ -70,7 +74,8 @@ export class BusinessDirectoryProvider extends BaseLeadProvider {
         if (!name) return;
 
         const city = cells[3] || null;
-        if (cityFilter && city && !city.toLowerCase().includes(cityFilter.toLowerCase())) {
+        const address = cells[2] || null;
+        if (targetCity && !matchesCityFilter(city, address, targetCity)) {
           return;
         }
 
@@ -89,7 +94,7 @@ export class BusinessDirectoryProvider extends BaseLeadProvider {
           industry: category.industry,
           category: category.label,
           phone: cells[1] || null,
-          address: cells[2] || null,
+          address,
           city,
           email: cells[4]?.includes('@') ? cells[4] : null,
           website: websiteRaw?.startsWith('www.') ? `https://${websiteRaw}` : websiteRaw,
@@ -98,9 +103,6 @@ export class BusinessDirectoryProvider extends BaseLeadProvider {
         });
       });
     }
-
-    // Soft cap awareness for city list size (future city-page expansion)
-    void loadMkCities;
 
     return results.slice(0, limit);
   }

@@ -18,6 +18,8 @@
     "scrape:business-directory": "tsx src/cli.ts scrape:business-directory",
     "scrape:industry-directory": "tsx src/cli.ts scrape:industry-directory",
     "normalize": "tsx src/cli.ts normalize",
+    "dedupe": "tsx src/cli.ts dedupe",
+    "dedupe:audit": "tsx src/cli.ts dedupe:audit",
     "audit": "tsx src/cli.ts audit",
     "screenshots": "tsx src/cli.ts screenshots",
     "discover-contacts": "tsx src/cli.ts discover-contacts",

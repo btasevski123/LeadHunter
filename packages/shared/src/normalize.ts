@@ -1,3 +1,5 @@
+import { cyrillicToLatinMk } from './mk-script';
+
 export function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
@@ -9,14 +11,19 @@ export function stripLegalSuffixes(name: string): string {
   return normalizeWhitespace(name.replace(LEGAL_SUFFIX_RE, ' '));
 }
 
+/**
+ * Fold names for matching/dedup. Cyrillic is transliterated to Latin so
+ * "Олимпија Фитнес" and "Olimpija Fitnes" compare as the same business.
+ */
 export function normalizeName(name: string): string {
-  return normalizeWhitespace(stripLegalSuffixes(name))
+  const folded = normalizeWhitespace(stripLegalSuffixes(name))
     .toLowerCase()
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^\p{L}\p{N}\s]/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
+  return cyrillicToLatinMk(folded);
 }
 
 export function normalizeRegistrationNumber(input?: string | null): string | null {

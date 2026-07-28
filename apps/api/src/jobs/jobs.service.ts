@@ -13,7 +13,14 @@ import {
   type Logger as ScraperLogger,
 } from '@leadhunter/scraper';
 import { captureScreenshots } from '@leadhunter/audit-engine';
-import { parseIndustry, type Industry } from '@leadhunter/shared';
+import {
+  canonicalizeCity,
+  expandIndustryFilter,
+  normalizeAddress,
+  normalizeName,
+  parseIndustry,
+  type Industry,
+} from '@leadhunter/shared';
 import { Queue, Worker, type Job } from 'bullmq';
 import IORedis from 'ioredis';
 import { createStorage } from '../storage/local-storage';
@@ -377,7 +384,7 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
 
   private parseIndustryFilter(industry?: string): Industry[] | undefined {
     const parsed = parseIndustry(industry);
-    return parsed ? [parsed] : undefined;
+    return parsed ? expandIndustryFilter(parsed) : undefined;
   }
 
   private async runScrape(jobId: string, opts: ScrapeOptions = {}) {
@@ -474,7 +481,7 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
 
   private async runNormalization(jobId: string) {
     try {
-      await this.markRunning(jobId, 'Recomputing source quality scores');
+      await this.markRunning(jobId, 'Recomputing derived company fields');
       const pageSize = 500;
       let cursor: string | undefined;
       let processed = 0;
@@ -487,6 +494,11 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
           orderBy: { id: 'asc' },
           select: {
             id: true,
+            name: true,
+            nameNormalized: true,
+            address: true,
+            addressNormalized: true,
+            city: true,
             sourceReferences: true,
             sourceName: true,
             hasWebsite: true,
@@ -508,11 +520,29 @@ export class JobsService implements OnModuleInit, OnModuleDestroy {
             phone: company.phone,
             googlePlaceId: company.googlePlaceId,
           });
-          if (score !== company.sourceQualityScore) {
-            await this.prisma.company.update({
-              where: { id: company.id },
-              data: { sourceQualityScore: score },
-            });
+
+          // `nameNormalized` and `addressNormalized` are derived from the shared
+          // normalizers and are queried for exact matches during dedupe, so they
+          // must be refreshed whenever those normalizers change.
+          const nameNormalized = normalizeName(company.name);
+          const addressNormalized = normalizeAddress(company.address);
+          // Sources disagree on script and language for the same city, and some
+          // yield junk; the matcher compares cities, so inconsistent values
+          // block genuine duplicates from merging.
+          const city = canonicalizeCity(company.city);
+
+          const data: Record<string, unknown> = {};
+          if (score !== company.sourceQualityScore) data.sourceQualityScore = score;
+          if (nameNormalized && nameNormalized !== company.nameNormalized) {
+            data.nameNormalized = nameNormalized;
+          }
+          if (addressNormalized !== company.addressNormalized) {
+            data.addressNormalized = addressNormalized;
+          }
+          if (city !== company.city) data.city = city;
+
+          if (Object.keys(data).length) {
+            await this.prisma.company.update({ where: { id: company.id }, data });
             updated += 1;
           }
           processed += 1;

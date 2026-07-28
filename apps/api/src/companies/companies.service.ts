@@ -9,6 +9,11 @@ import {
   nameSimilarity,
   companyFiltersSchema,
   cityFilterVariants,
+  canonicalizeCity,
+  addressSimilarity,
+  isDedupableWebsiteDomain,
+  normalizeAddress,
+  IDENTITY_THRESHOLDS,
   HIGH_VALUE_SCORE_THRESHOLD,
 } from '@leadhunter/shared';
 import type { Prisma } from '@leadhunter/database';
@@ -20,18 +25,18 @@ import {
   enrichFromGooglePlaces,
   generateAiAudit,
 } from '@leadhunter/audit-engine';
-import {
-  addressSimilarity,
-  companyNormalizer,
-  computeSourceQualityScore,
-  normalizeAddress,
-} from '@leadhunter/scraper';
+import { companyNormalizer, computeSourceQualityScore } from '@leadhunter/scraper';
 import { createStorage } from '../storage/local-storage';
 import { PrismaService } from '../prisma/prisma.service';
+import { LeadClassificationService } from '../classification/classification.service';
 
 @Injectable()
 export class CompaniesService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(LeadClassificationService)
+    private readonly classification: LeadClassificationService,
+  ) {}
 
   async list(rawQuery: Record<string, string>) {
     const filters = companyFiltersSchema.parse(rawQuery);
@@ -75,6 +80,7 @@ export class CompaniesService {
         discoveries: { orderBy: { createdAt: 'desc' } },
         emailTemplates: { orderBy: { createdAt: 'desc' } },
         sources: { orderBy: { scrapedAt: 'desc' } },
+        classification: true,
         audits: {
           orderBy: { auditedAt: 'desc' },
           include: { issues: true },
@@ -93,7 +99,7 @@ export class CompaniesService {
       data: {
         name: body.name !== undefined ? String(body.name) : undefined,
         industry: body.industry !== undefined ? String(body.industry || '') || null : undefined,
-        city: body.city !== undefined ? String(body.city || '') || null : undefined,
+        city: body.city !== undefined ? canonicalizeCity(String(body.city || '')) : undefined,
         address: body.address !== undefined ? String(body.address || '') || null : undefined,
         phone,
         phoneNormalized: phone !== undefined ? normalizePhoneMk(phone) : undefined,
@@ -190,6 +196,12 @@ export class CompaniesService {
             { name: existing.name },
             { name: normalized.name },
           ).name,
+          nameNormalized: normalizeName(
+            companyNormalizer.merge(
+              { name: existing.name },
+              { name: normalized.name },
+            ).name || normalized.name,
+          ),
           registrationNumber: existing.registrationNumber || registrationNumber,
           industry: existing.industry || normalized.industry,
           city: existing.city || normalized.city,
@@ -465,7 +477,13 @@ export class CompaniesService {
       });
     }
 
+    await this.classification.classifyAndStore(companyId);
+
     return audit;
+  }
+
+  async classifyOne(companyId: string) {
+    return this.classification.classifyAndStore(companyId);
   }
 
   async discoverContactsForCompany(companyId: string) {
@@ -556,11 +574,15 @@ export class CompaniesService {
     }
     if (filters.industry) {
       // Accept enum (PRINTING) and legacy display labels
+      const upper = filters.industry.replace(/\s+/g, '_').toUpperCase();
       const industryVariants = Array.from(
         new Set([
           filters.industry,
           filters.industry.toUpperCase(),
-          filters.industry.replace(/\s+/g, '_').toUpperCase(),
+          upper,
+          // Legacy HOSPITALITY ↔ split food/lodging
+          ...(upper === 'FOOD_BEVERAGE' || upper === 'LODGING' ? ['HOSPITALITY'] : []),
+          ...(upper === 'HOSPITALITY' ? ['FOOD_BEVERAGE', 'LODGING'] : []),
         ]),
       );
       and.push({
@@ -725,19 +747,29 @@ export class CompaniesService {
       });
       if (byPlace) return byPlace;
     }
-    if (input.websiteDomain) {
-      const byDomain = await this.prisma.company.findFirst({
-        where: { websiteDomain: input.websiteDomain },
+
+    // Domain / phone / email alone are weak — gate them on name similarity using
+    // the same thresholds the scraper's in-batch matcher applies.
+    if (isDedupableWebsiteDomain(input.websiteDomain)) {
+      const byDomain = await this.prisma.company.findMany({
+        where: { websiteDomain: input.websiteDomain! },
+        take: 15,
       });
-      if (byDomain) return byDomain;
+      const domainHit = byDomain.find(
+        (c) => nameSimilarity(c.name, input.name) >= IDENTITY_THRESHOLDS.domainNameGate,
+      );
+      if (domainHit) return domainHit;
     }
     if (input.phoneNormalized) {
-      const byPhone = await this.prisma.company.findFirst({
+      const byPhone = await this.prisma.company.findMany({
         where: { phoneNormalized: input.phoneNormalized },
+        take: 15,
       });
-      if (byPhone) return byPhone;
+      const phoneHit = byPhone.find(
+        (c) => nameSimilarity(c.name, input.name) >= IDENTITY_THRESHOLDS.phoneNameGate,
+      );
+      if (phoneHit) return phoneHit;
 
-      // Soft phone: same last 7 digits + strong name match (YP vs Maps digit drift)
       if (input.phoneNormalized.length >= 8) {
         const softCandidates = await this.prisma.company.findMany({
           where: {
@@ -749,7 +781,7 @@ export class CompaniesService {
           (c) =>
             c.phoneNormalized &&
             c.phoneNormalized !== input.phoneNormalized &&
-            nameSimilarity(c.name, input.name) >= 0.55,
+            nameSimilarity(c.name, input.name) >= IDENTITY_THRESHOLDS.phoneNameGate,
         );
         if (softHit) return softHit;
       }
@@ -758,7 +790,9 @@ export class CompaniesService {
       const byEmail = await this.prisma.company.findFirst({
         where: { email: input.email },
       });
-      if (byEmail) return byEmail;
+      if (byEmail && nameSimilarity(byEmail.name, input.name) >= IDENTITY_THRESHOLDS.emailNameGate) {
+        return byEmail;
+      }
     }
 
     const cityVariants = input.city ? cityFilterVariants(input.city) : [];
@@ -773,13 +807,12 @@ export class CompaniesService {
       });
       const addressHit = byAddress.find(
         (c) =>
-          nameSimilarity(c.name, input.name) >= 0.55 ||
-          addressSimilarity(c.address, input.address) >= 0.72,
+          nameSimilarity(c.name, input.name) >= IDENTITY_THRESHOLDS.addressWithTokenOverlap ||
+          addressSimilarity(c.address, input.address) >= IDENTITY_THRESHOLDS.addressStrong,
       );
       if (addressHit) return addressHit;
     }
 
-    // Exact normalized name + any city spelling variant (КОЧАНИ ↔ Кочани)
     if (input.nameNormalized) {
       const sameName = await this.prisma.company.findFirst({
         where: {
@@ -797,10 +830,214 @@ export class CompaniesService {
       take: 80,
       orderBy: { updatedAt: 'desc' },
     });
-    const strong = candidates.find((c) => nameSimilarity(c.name, input.name) >= 0.75);
-    if (strong) return strong;
+    return (
+      candidates.find(
+        (c) => nameSimilarity(c.name, input.name) >= IDENTITY_THRESHOLDS.nameFallbackInCity,
+      ) || null
+    );
+  }
 
-    return candidates.find((c) => nameSimilarity(c.name, input.name) >= 0.9) || null;
+  /**
+   * Merge near-duplicate companies already in the DB (same name+city, etc.).
+   * Also rewrites nameNormalized so future scrapes match correctly.
+   */
+  async dedupeExistingCompanies(): Promise<{
+    scanned: number;
+    nameNormalizedFixed: number;
+    merged: number;
+    deleted: number;
+  }> {
+    const all = await this.prisma.company.findMany({
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        nameNormalized: true,
+        city: true,
+        industry: true,
+        phoneNormalized: true,
+        websiteDomain: true,
+        googlePlaceId: true,
+        website: true,
+        email: true,
+        phone: true,
+        sourceQualityScore: true,
+        sourceReferences: true,
+        sourceName: true,
+        hasWebsite: true,
+        createdAt: true,
+      },
+    });
+
+    let nameNormalizedFixed = 0;
+    for (const company of all) {
+      const expected = normalizeName(company.name);
+      if (expected && expected !== company.nameNormalized) {
+        await this.prisma.company.update({
+          where: { id: company.id },
+          data: { nameNormalized: expected },
+        });
+        company.nameNormalized = expected;
+        nameNormalizedFixed += 1;
+      }
+    }
+
+    const mergedIds = new Set<string>();
+    let merged = 0;
+    let deleted = 0;
+
+    const groups = new Map<string, typeof all>();
+    for (const company of all) {
+      if (mergedIds.has(company.id)) continue;
+      const key = `${company.nameNormalized}|${(company.city || '').toLowerCase()}`;
+      const list = groups.get(key) || [];
+      list.push(company);
+      groups.set(key, list);
+    }
+
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      const keeper = this.pickKeeper(group);
+      for (const loser of group) {
+        if (loser.id === keeper.id || mergedIds.has(loser.id)) continue;
+        await this.mergeCompanyRecord(keeper.id, loser.id);
+        mergedIds.add(loser.id);
+        merged += 1;
+        deleted += 1;
+      }
+    }
+
+    const remaining = all.filter((c) => !mergedIds.has(c.id));
+    for (let i = 0; i < remaining.length; i++) {
+      const a = remaining[i]!;
+      if (mergedIds.has(a.id)) continue;
+      for (let j = i + 1; j < remaining.length; j++) {
+        const b = remaining[j]!;
+        if (mergedIds.has(b.id)) continue;
+        if (!a.city || !b.city) continue;
+        const sameCity = cityFilterVariants(a.city).some((v) =>
+          cityFilterVariants(b.city!).includes(v),
+        );
+        if (!sameCity) continue;
+        if (nameSimilarity(a.name, b.name) < 0.88) continue;
+        const keeper = this.pickKeeper([a, b]);
+        const loser = keeper.id === a.id ? b : a;
+        await this.mergeCompanyRecord(keeper.id, loser.id);
+        mergedIds.add(loser.id);
+        merged += 1;
+        deleted += 1;
+      }
+    }
+
+    return {
+      scanned: all.length,
+      nameNormalizedFixed,
+      merged,
+      deleted,
+    };
+  }
+
+  private pickKeeper<
+    T extends {
+      id: string;
+      googlePlaceId: string | null;
+      website: string | null;
+      email: string | null;
+      phone: string | null;
+      sourceQualityScore: number;
+      createdAt: Date;
+    },
+  >(group: T[]): T {
+    return [...group].sort((a, b) => {
+      const score = (c: T) =>
+        (c.googlePlaceId ? 8 : 0) +
+        (c.website ? 4 : 0) +
+        (c.email ? 2 : 0) +
+        (c.phone ? 1 : 0) +
+        c.sourceQualityScore / 100;
+      const diff = score(b) - score(a);
+      if (diff !== 0) return diff;
+      return a.createdAt.getTime() - b.createdAt.getTime();
+    })[0]!;
+  }
+
+  private async mergeCompanyRecord(keeperId: string, loserId: string) {
+    const [keeper, loser] = await Promise.all([
+      this.prisma.company.findUnique({ where: { id: keeperId } }),
+      this.prisma.company.findUnique({ where: { id: loserId } }),
+    ]);
+    if (!keeper || !loser) return;
+
+    const sourceReferences = Array.from(
+      new Set([...(keeper.sourceReferences || []), ...(loser.sourceReferences || [])]),
+    );
+
+    const loserSources = await this.prisma.companySource.findMany({
+      where: { companyId: loserId },
+    });
+    for (const src of loserSources) {
+      await this.prisma.companySource.upsert({
+        where: {
+          companyId_sourceName: {
+            companyId: keeperId,
+            sourceName: src.sourceName,
+          },
+        },
+        create: {
+          companyId: keeperId,
+          sourceName: src.sourceName,
+          sourceUrl: src.sourceUrl,
+          scrapedAt: src.scrapedAt,
+        },
+        update: {
+          sourceUrl: src.sourceUrl || undefined,
+        },
+      });
+    }
+
+    // Clear loser's unique googlePlaceId before delete so keeper can inherit it
+    if (!keeper.googlePlaceId && loser.googlePlaceId) {
+      await this.prisma.company.update({
+        where: { id: loserId },
+        data: { googlePlaceId: null },
+      });
+    }
+
+    await this.prisma.company.update({
+      where: { id: keeperId },
+      data: {
+        registrationNumber: keeper.registrationNumber || loser.registrationNumber,
+        industry: keeper.industry || loser.industry,
+        city: keeper.city || loser.city,
+        municipality: keeper.municipality || loser.municipality,
+        address: keeper.address || loser.address,
+        addressNormalized: keeper.addressNormalized || loser.addressNormalized,
+        phone: keeper.phone || loser.phone,
+        phoneNormalized: keeper.phoneNormalized || loser.phoneNormalized,
+        email: keeper.email || loser.email,
+        website: keeper.website || loser.website,
+        websiteDomain: keeper.websiteDomain || loser.websiteDomain,
+        hasWebsite: Boolean(keeper.website || loser.website),
+        facebookUrl: keeper.facebookUrl || loser.facebookUrl,
+        linkedinUrl: keeper.linkedinUrl || loser.linkedinUrl,
+        instagramUrl: keeper.instagramUrl || loser.instagramUrl,
+        googleMapsUrl: keeper.googleMapsUrl || loser.googleMapsUrl,
+        googlePlaceId: keeper.googlePlaceId || loser.googlePlaceId,
+        googleRating: keeper.googleRating ?? loser.googleRating,
+        googleReviewsCount: keeper.googleReviewsCount ?? loser.googleReviewsCount,
+        googleCategory: keeper.googleCategory || loser.googleCategory,
+        googleBusinessStatus: keeper.googleBusinessStatus || loser.googleBusinessStatus,
+        nameNormalized: normalizeName(keeper.name),
+        sourceReferences,
+        sourceQualityScore: Math.max(keeper.sourceQualityScore, loser.sourceQualityScore),
+        latestLeadScore:
+          keeper.latestLeadScore != null && loser.latestLeadScore != null
+            ? Math.max(keeper.latestLeadScore, loser.latestLeadScore)
+            : (keeper.latestLeadScore ?? loser.latestLeadScore),
+      },
+    });
+
+    await this.prisma.company.delete({ where: { id: loserId } });
   }
 
   private async getSettingFlag(group: string, key: string): Promise<boolean> {

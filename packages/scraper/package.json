@@ -14,7 +14,7 @@
     "build": "tsc -p tsconfig.json && mkdir -p dist/config && cp -R config/. dist/config/ 2>/dev/null || cp -R ../config/. dist/config/ 2>/dev/null || true",
     "dev": "tsc -p tsconfig.json --watch",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/dedupe.test.ts src/normalizer.test.ts src/providers/provider-interface.test.ts"
+    "test": "tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@leadhunter/shared": "*",
