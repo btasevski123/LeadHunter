@@ -23,7 +23,15 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const text = await res.text();
-    throw new ApiError(text || res.statusText, res.status);
+    let message = text || res.statusText;
+    try {
+      const parsed = JSON.parse(text) as { message?: string | string[] };
+      if (typeof parsed.message === 'string') message = parsed.message;
+      else if (Array.isArray(parsed.message)) message = parsed.message.join(', ');
+    } catch {
+      // keep raw text
+    }
+    throw new ApiError(message, res.status);
   }
 
   if (res.status === 204) return undefined as T;

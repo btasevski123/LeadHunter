@@ -39,7 +39,17 @@ type CompanyDetail = {
   } | null;
   screenshot: { desktopPath: string | null; mobilePath: string | null } | null;
   contacts: { id: string; type: string; value: string; confidence: number; isPrimary: boolean }[];
-  emailTemplates: { id: string; subject: string; content: string; kind: string; createdAt: string }[];
+  emailTemplates: {
+    id: string;
+    subject: string;
+    content: string;
+    kind: string;
+    language: string;
+    toEmail: string | null;
+    sentAt: string | null;
+    sentError: string | null;
+    createdAt: string;
+  }[];
   classification: {
     id: string;
     classification: string;
@@ -71,10 +81,20 @@ export default function CompanyDetailPage() {
   const id = params.id;
   const qc = useQueryClient();
   const [note, setNote] = useState('');
+  const [emailLanguage, setEmailLanguage] = useState<'en' | 'mk'>('mk');
+  const [sendToOverride, setSendToOverride] = useState('');
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['company', id],
     queryFn: () => api.get<CompanyDetail>(`/companies/${id}`),
+  });
+
+  const { data: emailStatus } = useQuery({
+    queryKey: ['email-status'],
+    queryFn: () =>
+      api.get<{ smtpConfigured: boolean; fromEmail: string | null; fromName: string | null }>(
+        '/emails/status',
+      ),
   });
 
   const auditMutation = useMutation({
@@ -88,8 +108,23 @@ export default function CompanyDetailPage() {
   });
 
   const emailMutation = useMutation({
-    mutationFn: () => api.post('/emails/generate', { companyId: id, kind: 'OUTREACH' }),
+    mutationFn: () =>
+      api.post('/emails/generate', {
+        companyId: id,
+        kind: 'OUTREACH',
+        language: emailLanguage,
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['company', id] }),
+  });
+
+  const sendMutation = useMutation({
+    mutationFn: (templateId: string) =>
+      api.post(`/emails/${templateId}/send`, {
+        toEmail: sendToOverride.trim() || undefined,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['company', id] });
+    },
   });
 
   const outreachMutation = useMutation({
@@ -141,8 +176,20 @@ export default function CompanyDetailPage() {
           >
             {classifyMutation.isPending ? 'Classifying…' : 'Classify lead'}
           </Button>
-          <Button variant="secondary" onClick={() => emailMutation.mutate()} disabled={emailMutation.isPending}>
-            Generate email
+          <Select
+            value={emailLanguage}
+            onChange={(e) => setEmailLanguage(e.target.value as 'en' | 'mk')}
+            className="w-[140px]"
+          >
+            <option value="mk">Македонски</option>
+            <option value="en">English</option>
+          </Select>
+          <Button
+            variant="secondary"
+            onClick={() => emailMutation.mutate()}
+            disabled={emailMutation.isPending}
+          >
+            {emailMutation.isPending ? 'Generating…' : 'Generate email'}
           </Button>
         </div>
       </div>
@@ -397,18 +444,76 @@ export default function CompanyDetailPage() {
       <Card>
         <CardHeader>
           <CardTitle>Generated emails</CardTitle>
+          <CardDescription>
+            {emailStatus?.smtpConfigured
+              ? `Sends from ${emailStatus.fromName || emailStatus.fromEmail}`
+              : 'SMTP not configured — add SMTP_* vars in .env to send from the platform'}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[240px] flex-1 space-y-1">
+              <div className="text-xs text-muted-foreground">Send to (optional override)</div>
+              <input
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                placeholder={data.email || 'client@example.com'}
+                value={sendToOverride}
+                onChange={(e) => setSendToOverride(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {emailMutation.isError ? (
+            <p className="text-sm text-rose-400">Failed to generate email.</p>
+          ) : null}
+          {sendMutation.isError ? (
+            <p className="text-sm text-rose-400">
+              {(sendMutation.error as Error)?.message || 'Failed to send email.'}
+            </p>
+          ) : null}
+
           {data.emailTemplates.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No generated emails yet.</p>
+            <p className="text-sm text-muted-foreground">
+              No generated emails yet. Pick a language and click Generate email.
+            </p>
           ) : (
             data.emailTemplates.map((t) => (
               <div key={t.id} className="rounded-xl border border-border p-4">
-                <div className="flex items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="font-medium">{t.subject}</div>
-                  <Badge variant="outline">{t.kind}</Badge>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="outline">{t.kind}</Badge>
+                    <Badge variant="secondary">{t.language === 'mk' ? 'MK' : 'EN'}</Badge>
+                    {t.sentAt ? <Badge variant="success">Sent</Badge> : null}
+                  </div>
                 </div>
-                <pre className="mt-3 whitespace-pre-wrap font-sans text-sm text-muted-foreground">{t.content}</pre>
+                <div className="mt-2 text-xs text-muted-foreground">
+                  To: {t.toEmail || data.email || sendToOverride || '—'}
+                  {t.sentAt ? ` · Sent ${formatDate(t.sentAt)}` : ''}
+                </div>
+                {t.sentError ? (
+                  <p className="mt-2 text-sm text-rose-400">{t.sentError}</p>
+                ) : null}
+                <pre className="mt-3 whitespace-pre-wrap font-sans text-sm text-muted-foreground">
+                  {t.content}
+                </pre>
+                <div className="mt-3">
+                  <Button
+                    size="sm"
+                    disabled={
+                      sendMutation.isPending ||
+                      !emailStatus?.smtpConfigured ||
+                      !(sendToOverride.trim() || t.toEmail || data.email)
+                    }
+                    onClick={() => sendMutation.mutate(t.id)}
+                  >
+                    {sendMutation.isPending && sendMutation.variables === t.id
+                      ? 'Sending…'
+                      : t.sentAt
+                        ? 'Send again'
+                        : 'Send email'}
+                  </Button>
+                </div>
               </div>
             ))
           )}

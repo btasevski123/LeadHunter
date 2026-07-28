@@ -23,6 +23,14 @@ export class SettingsService {
         dashboardApiKeyEnabled: Boolean(process.env.API_KEY),
         ...(typeof map.apiKeys === 'object' && map.apiKeys ? map.apiKeys : {}),
       },
+      email: {
+        smtpConfigured: Boolean(
+          process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS,
+        ),
+        fromEmail: process.env.SMTP_FROM || process.env.SMTP_USER || null,
+        fromName: process.env.SMTP_FROM_NAME || null,
+        host: process.env.SMTP_HOST || null,
+      },
     });
 
     return {

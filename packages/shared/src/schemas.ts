@@ -102,6 +102,14 @@ export const appSettingsSchema = z.object({
       dashboardApiKeyEnabled: z.boolean().default(false),
     })
     .default({}),
+  email: z
+    .object({
+      smtpConfigured: z.boolean().default(false),
+      fromEmail: z.string().nullable().optional(),
+      fromName: z.string().nullable().optional(),
+      host: z.string().nullable().optional(),
+    })
+    .default({}),
 });
 
 export type AppSettings = z.infer<typeof appSettingsSchema>;

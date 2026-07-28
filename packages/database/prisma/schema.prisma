@@ -318,14 +318,19 @@ model EmailTemplate {
   id        String    @id @default(cuid())
   companyId String?
   kind      EmailKind @default(OUTREACH)
+  language  String    @default("en")
   subject   String
   content   String
+  toEmail   String?
+  sentAt    DateTime?
+  sentError String?
   createdAt DateTime  @default(now())
 
   company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@index([companyId])
   @@index([kind])
+  @@index([sentAt])
 }
 
 model AppSetting {

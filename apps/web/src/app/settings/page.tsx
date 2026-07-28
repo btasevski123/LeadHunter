@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -34,6 +35,12 @@ type SettingsResponse = {
   apiKeys: {
     openaiConfigured: boolean;
     dashboardApiKeyEnabled: boolean;
+  };
+  email: {
+    smtpConfigured: boolean;
+    fromEmail: string | null;
+    fromName: string | null;
+    host: string | null;
   };
   availableProviders: { id: string; name: string; industries: string[] }[];
 };
@@ -255,6 +262,58 @@ export default function SettingsPage() {
         </Button>
         {saveMutation.isSuccess && <span className="self-center text-sm text-emerald-400">Saved.</span>}
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Outbound email (SMTP)</CardTitle>
+          <CardDescription>
+            Send generated outreach emails from LeadHunter as your company address
+            (e.g. info@yourcompany.com) without opening Gmail.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm">
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={form.email?.smtpConfigured ? 'success' : 'warning'}>
+              {form.email?.smtpConfigured ? 'SMTP configured' : 'SMTP not configured'}
+            </Badge>
+            {form.apiKeys.openaiConfigured ? (
+              <Badge variant="success">OpenAI ready (richer drafts)</Badge>
+            ) : (
+              <Badge variant="outline">OpenAI optional</Badge>
+            )}
+          </div>
+          {form.email?.smtpConfigured ? (
+            <div className="space-y-1 text-muted-foreground">
+              <div>From: {form.email.fromName || '—'} &lt;{form.email.fromEmail}&gt;</div>
+              <div>Host: {form.email.host}</div>
+            </div>
+          ) : (
+            <div className="space-y-2 text-muted-foreground">
+              <p>Add these to <code className="text-foreground">.env</code> and restart the API:</p>
+              <pre className="overflow-x-auto rounded-md border border-border bg-muted/30 p-3 text-xs text-foreground">
+{`SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=info@yourcompany.com
+SMTP_PASS=your-app-password
+SMTP_FROM=info@yourcompany.com
+SMTP_FROM_NAME=Your Company`}
+              </pre>
+              <p>
+                For Google Workspace / Gmail: enable 2FA, then create an{' '}
+                <a
+                  className="text-sky-400 hover:underline"
+                  href="https://myaccount.google.com/apppasswords"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  App Password
+                </a>
+                .
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
