@@ -31,7 +31,7 @@ export class ExportsService {
           audits: { where: { isLatest: true }, take: 1, include: { issues: true } },
           screenshot: true,
         },
-        orderBy: { latestLeadScore: 'desc' },
+        orderBy: { latestLeadScore: { sort: 'desc', nulls: 'last' } },
         take: 500,
       });
 

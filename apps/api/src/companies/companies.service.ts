@@ -46,6 +46,14 @@ export class CompaniesService {
     const sortBy = filters.sortBy;
     const sortDir = filters.sortDir;
 
+    // Postgres puts NULL first on DESC by default, so an unscored majority
+    // would bury every real lead score under pages of dashes. Always park
+    // null scores after scored rows when sorting by latestLeadScore.
+    const orderBy =
+      sortBy === 'latestLeadScore'
+        ? { latestLeadScore: { sort: sortDir, nulls: 'last' as const } }
+        : { [sortBy]: sortDir };
+
     const [total, data] = await this.prisma.$transaction([
       this.prisma.company.count({ where }),
       this.prisma.company.findMany({
@@ -55,7 +63,7 @@ export class CompaniesService {
           screenshot: true,
           audits: { where: { isLatest: true }, take: 1 },
         },
-        orderBy: { [sortBy]: sortDir },
+        orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
