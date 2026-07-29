@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { notify } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -34,6 +35,7 @@ type SettingsResponse = {
   };
   apiKeys: {
     openaiConfigured: boolean;
+    geminiConfigured: boolean;
     dashboardApiKeyEnabled: boolean;
   };
   email: {
@@ -59,15 +61,26 @@ export default function SettingsPage() {
 
   const saveMutation = useMutation({
     mutationFn: (body: SettingsResponse) => api.put('/settings', body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['settings'] });
+      notify.success('Settings saved');
+    },
+    onError: (error) => notify.error(error, 'Failed to save settings'),
   });
 
   const jobMutation = useMutation({
     mutationFn: (path: string) => api.post(path),
+    onSuccess: (_data, path) => {
+      const label = path.replace('/jobs/', '').replaceAll('-', ' ');
+      notify.success('Job started', label);
+    },
+    onError: (error) => notify.error(error, 'Failed to start job'),
   });
 
   const exportMutation = useMutation({
     mutationFn: (format: 'CSV' | 'XLSX' | 'PDF') => api.post('/exports', { format }),
+    onSuccess: (_data, format) => notify.success(`${format} export created`),
+    onError: (error) => notify.error(error, 'Export failed'),
   });
 
   if (!form) return <div className="text-muted-foreground">Loading settings…</div>;
@@ -92,7 +105,10 @@ export default function SettingsPage() {
               {form.availableProviders.map((p) => {
                 const checked = form.scraper.enabledProviders.includes(p.id);
                 return (
-                  <label key={p.id} className="flex items-start gap-3 rounded-lg border border-border p-3 text-sm">
+                  <label
+                    key={p.id}
+                    className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 text-sm transition-colors hover:bg-accent/40"
+                  >
                     <input
                       type="checkbox"
                       checked={checked}
@@ -143,7 +159,7 @@ export default function SettingsPage() {
             <CardTitle>Audit configuration</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={form.audit.lightweight}
@@ -153,7 +169,7 @@ export default function SettingsPage() {
               />
               Lightweight mode (heuristics only, skip full Lighthouse)
             </label>
-            <label className="flex items-center gap-2 text-sm">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
               <input
                 type="checkbox"
                 checked={form.audit.captureScreenshots}
@@ -260,7 +276,6 @@ export default function SettingsPage() {
         <Button onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
           {saveMutation.isPending ? 'Saving…' : 'Save settings'}
         </Button>
-        {saveMutation.isSuccess && <span className="self-center text-sm text-emerald-400">Saved.</span>}
       </div>
 
       <Card>
@@ -276,11 +291,10 @@ export default function SettingsPage() {
             <Badge variant={form.email?.smtpConfigured ? 'success' : 'warning'}>
               {form.email?.smtpConfigured ? 'SMTP configured' : 'SMTP not configured'}
             </Badge>
+            <Badge variant="success">Email templates (MK/EN)</Badge>
             {form.apiKeys.openaiConfigured ? (
-              <Badge variant="success">OpenAI ready (richer drafts)</Badge>
-            ) : (
-              <Badge variant="outline">OpenAI optional</Badge>
-            )}
+              <Badge variant="outline">OpenAI ready (audits)</Badge>
+            ) : null}
           </div>
           {form.email?.smtpConfigured ? (
             <div className="space-y-1 text-muted-foreground">
@@ -346,10 +360,6 @@ SMTP_FROM_NAME=Your Company`}
           <Button variant="outline" onClick={() => exportMutation.mutate('PDF')}>
             Export PDF
           </Button>
-          {jobMutation.isSuccess && <span className="text-sm text-emerald-400">Job started.</span>}
-          {exportMutation.isSuccess && (
-            <span className="text-sm text-emerald-400">Export created.</span>
-          )}
         </CardContent>
       </Card>
     </div>

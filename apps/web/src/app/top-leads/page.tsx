@@ -34,7 +34,7 @@ export default function TopLeadsPage() {
           </Card>
         ) : (
           data.map((company, index) => (
-            <Card key={company.id} className="transition hover:border-primary/40">
+            <Card key={company.id} className="cursor-pointer transition hover:border-primary/40 hover:shadow-md">
               <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
                 <div className="min-w-0">
                   <div className="text-xs text-muted-foreground">#{index + 1}</div>

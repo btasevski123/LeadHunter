@@ -448,6 +448,7 @@ export class CompaniesService {
         scoreReasons: result.score.reasons,
         auditSummary: result.auditSummary,
         aiRecommendations,
+        outreachAnalysis: result.outreachAnalysis,
         issuesCount: result.issues.length,
         isLatest: true,
         issues: {

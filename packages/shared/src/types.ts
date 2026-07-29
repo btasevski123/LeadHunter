@@ -153,4 +153,9 @@ export interface WebsiteAuditResult {
   aiRecommendations: string;
   issues: AuditIssueInput[];
   score: ScoreResult;
+  /** Plain-language facts for personalized outreach (fixed vocabulary). */
+  outreachAnalysis: {
+    positive_observations: string[];
+    issues: string[];
+  };
 }

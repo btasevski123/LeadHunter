@@ -1,6 +1,17 @@
 import type { ScoreResult } from '@leadhunter/shared';
+import {
+  analyzeWebsiteForOutreach,
+  pickOutreachEmailFacts,
+  type OutreachWebsiteAnalysis,
+} from './outreach-analysis';
 
 export type EmailLanguage = 'en' | 'mk';
+
+export interface WebsiteIssueInput {
+  title: string;
+  description?: string | null;
+  severity?: string | null;
+}
 
 export interface EmailGeneratorInput {
   companyName: string;
@@ -9,11 +20,32 @@ export interface EmailGeneratorInput {
   website?: string | null;
   contactName?: string | null;
   recipientEmail?: string | null;
+  /** Internal only — never mentioned in the email text. */
   score?: ScoreResult | null;
   auditSummary?: string | null;
   aiRecommendations?: string | null;
   classification?: string | null;
   recommendedService?: string | null;
+  websiteIssues?: WebsiteIssueInput[];
+  /**
+   * Structured analyzer output. Templates may ONLY fill slots from
+   * these lists (exactly one positive, one primary issue).
+   */
+  outreachAnalysis?: OutreachWebsiteAnalysis | null;
+  /** Fallback signals when outreachAnalysis was not persisted yet. */
+  auditSignals?: {
+    websiteExists?: boolean;
+    websiteAccessible?: boolean;
+    sslEnabled?: boolean;
+    mobileFriendly?: boolean;
+    hasContactForm?: boolean;
+    hasGoogleMaps?: boolean;
+    hasSocialLinks?: boolean;
+    designAgeEstimate?: 'modern' | 'aging' | 'outdated' | 'unknown';
+    lighthousePerformance?: number | null;
+    hasPhone?: boolean;
+    hasEmail?: boolean;
+  } | null;
   senderName?: string | null;
   senderCompany?: string | null;
   kind?: 'OUTREACH' | 'FOLLOW_UP';
@@ -24,22 +56,85 @@ export interface GeneratedEmail {
   subject: string;
   content: string;
   language: EmailLanguage;
+  /** Always templates — kept for API/UI compatibility. */
+  source: 'template';
 }
 
+/** Resolve the analyzer payload used for email facts (never invent outside vocab). */
+export function resolveOutreachAnalysis(
+  input: EmailGeneratorInput,
+): OutreachWebsiteAnalysis {
+  if (input.outreachAnalysis) {
+    return {
+      positive_observations: input.outreachAnalysis.positive_observations || [],
+      issues: input.outreachAnalysis.issues || [],
+    };
+  }
+
+  const s = input.auditSignals;
+  if (s) {
+    return analyzeWebsiteForOutreach({
+      websiteExists: s.websiteExists ?? Boolean(input.website),
+      websiteAccessible: s.websiteAccessible ?? Boolean(input.website),
+      sslEnabled: Boolean(s.sslEnabled),
+      mobileFriendly: Boolean(s.mobileFriendly),
+      hasContactForm: Boolean(s.hasContactForm),
+      hasGoogleMaps: Boolean(s.hasGoogleMaps),
+      hasSocialLinks: Boolean(s.hasSocialLinks),
+      designAgeEstimate: s.designAgeEstimate || 'unknown',
+      lighthousePerformance: s.lighthousePerformance ?? null,
+      hasPhone: Boolean(s.hasPhone),
+      hasEmail: Boolean(s.hasEmail || input.recipientEmail),
+    });
+  }
+
+  return analyzeWebsiteForOutreach({
+    websiteExists: Boolean(input.website),
+    websiteAccessible: Boolean(input.website),
+    sslEnabled: true,
+    mobileFriendly: true,
+    hasContactForm: false,
+    hasGoogleMaps: false,
+    hasSocialLinks: false,
+    designAgeEstimate: 'unknown',
+    lighthousePerformance: null,
+    hasEmail: Boolean(input.recipientEmail),
+  });
+}
+
+/**
+ * Facts templates are allowed to mention.
+ * Exactly one positive (if any). One primary issue. Nothing invented.
+ */
+export function buildOutreachBrief(input: EmailGeneratorInput): {
+  observations: string[];
+  issues: string[];
+  hasWebsite: boolean;
+  positive: string | null;
+} {
+  const analysis = resolveOutreachAnalysis(input);
+  const picked = pickOutreachEmailFacts(analysis);
+  return {
+    observations: picked.positive ? [picked.positive] : [],
+    issues: picked.issues,
+    hasWebsite: Boolean(input.website) && !analysis.issues.includes('No active website'),
+    positive: picked.positive,
+  };
+}
+
+/** Fill MK/EN outreach templates from analyzer facts — no AI. */
 export async function generateOutreachEmail(
   input: EmailGeneratorInput,
 ): Promise<GeneratedEmail> {
   const language: EmailLanguage = input.language === 'mk' ? 'mk' : 'en';
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (apiKey) {
-    try {
-      const ai = await generateWithOpenAi({ ...input, language });
-      if (ai) return { ...ai, language };
-    } catch {
-      // fallback
-    }
-  }
-  return { ...generateRuleBasedEmail({ ...input, language }), language };
+  const draft = generateTemplateEmail({ ...input, language });
+
+  return {
+    subject: scrubBannedPhrases(draft.subject),
+    content: scrubBannedPhrases(draft.content),
+    language,
+    source: 'template',
+  };
 }
 
 function senderSignOff(input: EmailGeneratorInput): string {
@@ -48,198 +143,214 @@ function senderSignOff(input: EmailGeneratorInput): string {
   if (name && company) return `${name}\n${company}`;
   if (name) return name;
   if (company) return company;
-  return input.language === 'mk' ? 'Со почит' : 'Best regards';
+  return '';
 }
 
-function generateRuleBasedEmail(input: EmailGeneratorInput): GeneratedEmail {
-  const language: EmailLanguage = input.language === 'mk' ? 'mk' : 'en';
-  const city = input.city || (language === 'mk' ? 'Северна Македонија' : 'North Macedonia');
-  const kind = input.kind || 'OUTREACH';
-  const score = input.score?.score;
-  const noWebsite = !input.website || input.score?.reasons.includes('No website');
+/** Positive clause after "Забележав дека …" / "I noticed that …" */
+function positiveClause(text: string | null | undefined, language: EmailLanguage): string | null {
+  if (!text) return null;
+  const mk: Record<string, string> = {
+    'Contact information is easy to find': 'контакт информациите лесно се наоѓаат',
+    'Services are clearly explained': 'услугите се јасно објаснети',
+    'Strong local brand presence': 'имате добро присуство како локален бизнис',
+    'Professional photography': 'имате квалитетни фотографии',
+    'Simple navigation': 'навигацијата е едноставна',
+    'Works well on mobile': 'сајтот добро се гледа на телефон',
+    'Site loads over HTTPS': 'страницата користи безбедна врска',
+    'Modern visual design': 'дизајнот изгледа современо',
+  };
+  const en: Record<string, string> = {
+    'Contact information is easy to find': 'contact information is easy to find',
+    'Services are clearly explained': 'services are clearly explained',
+    'Strong local brand presence': 'you have a strong local presence',
+    'Professional photography': 'you have good quality photography',
+    'Simple navigation': 'navigation is simple',
+    'Works well on mobile': 'the website works well on mobile',
+    'Site loads over HTTPS': 'the website uses a secure connection',
+    'Modern visual design': 'the design looks modern',
+  };
+  const map = language === 'mk' ? mk : en;
+  return map[text] || lowerFirst(text);
+}
+
+function lowerFirst(text: string): string {
+  if (!text) return text;
+  return text.charAt(0).toLowerCase() + text.slice(1);
+}
+
+/** Constructive observation — no blame, no “outdated / losing customers”. */
+function issueParagraph(issueKey: string | undefined, language: EmailLanguage): string | null {
+  if (!issueKey) return null;
+
+  if (language === 'mk') {
+    const mk: Record<string, string> = {
+      'Not mobile friendly':
+        'На телефон, приказот би можел да биде појасен и полесен за користење.',
+      'No HTTPS':
+        'Страницата би можела да користи безбедна HTTPS врска.',
+      'Outdated visual design':
+        'Визуелниот приказ би можел да изгледа посвежо и појасно.',
+      'No clear way to get in touch':
+        'Би било полесно ако има јасен начин да се прати барање директно од страницата.',
+      'Pages feel slow':
+        'Страницата би можела да се отвора побрзо.',
+      'Website is offline or unreachable':
+        'Моментално страницата не се отвора стабилно.',
+      'No active website':
+        'Моментално нема активна веб-страница.',
+    };
+    return mk[issueKey] || null;
+  }
+
+  const en: Record<string, string> = {
+    'Not mobile friendly':
+      'On mobile, the layout could be clearer and easier to use.',
+    'No HTTPS':
+      'The website could use a secure HTTPS connection.',
+    'Outdated visual design':
+      'The visual presentation could look fresher and clearer.',
+    'No clear way to get in touch':
+      'It would help to have a clearer way to send an inquiry from the page.',
+    'Pages feel slow':
+      'The pages could open a bit faster.',
+    'Website is offline or unreachable':
+      'The website does not open reliably at the moment.',
+    'No active website':
+      'There does not appear to be an active website right now.',
+  };
+  return en[issueKey] || null;
+}
+
+/** Intro + issue body; omitted entirely when there is no issue. */
+function issueSection(issueBody: string | null, language: EmailLanguage): string | null {
+  if (!issueBody) return null;
+  if (language === 'mk') {
+    return `Имаше една работа која мислам дека би можела да се подобри:\n\n${issueBody}`;
+  }
+  return `There was one thing I thought could be improved:\n\n${issueBody}`;
+}
+
+function closingBlock(language: EmailLanguage, signOff: string): string {
+  if (language === 'mk') {
+    return signOff ? `Поздрав,\n${signOff}` : 'Поздрав,';
+  }
+  return signOff ? `Best,\n${signOff}` : 'Best,';
+}
+
+function generateTemplateEmail(
+  input: EmailGeneratorInput & { language: EmailLanguage },
+): { subject: string; content: string } {
+  const { language } = input;
+  const brief = buildOutreachBrief(input);
   const signOff = senderSignOff(input);
   const greeting = input.contactName
     ? language === 'mk'
-      ? `Почитувани ${input.contactName},`
-      : `Dear ${input.contactName},`
+      ? `Здраво ${input.contactName},`
+      : `Hi ${input.contactName},`
     : language === 'mk'
-      ? 'Почитувани,'
-      : 'Hello,';
+      ? 'Здраво,'
+      : 'Hi,';
+  const close = closingBlock(language, signOff);
+  const positive = positiveClause(brief.positive, language);
+  const issue = issueSection(issueParagraph(brief.issues[0], language), language);
 
   if (language === 'mk') {
-    if (kind === 'FOLLOW_UP') {
+    if (input.kind === 'FOLLOW_UP') {
       return {
-        language,
-        subject: `Следење — онлајн присуство за ${input.companyName}`,
-        content: `${greeting}
-
-Сакав накратко да се надоврзам на претходната порака во врска со онлајн присуството на ${input.companyName}${input.city ? ` во ${input.city}` : ''}.
-
-Многу локални ${input.industry || 'бизниси'} губат потенцијални клиенти бидејќи веб-страницата не е доволно јасна, мобилна или видлива на Google. Можам да ви подготвам краток предлог со конкретни подобрувања.
-
-Дали би биле отворени за краток разговор од 15 минути оваа недела?
-
-${signOff}`,
+        subject: `Кратка порака за ${input.companyName}`,
+        content: joinBody([
+          greeting,
+          `Само кратко да се надоврзам на претходната порака за ${input.companyName}.`,
+          `Не сакам да ви одземам време, само сакав да проверам дали би сакале да ви испратам неколку идеи за можни подобрувања.`,
+          `Доколку моментално не е приоритет, нема никаков проблем.`,
+          `Ви посакувам успешна работа.`,
+          close,
+        ]),
       };
     }
 
-    if (noWebsite) {
+    if (!brief.hasWebsite) {
+      const cityBit = input.city?.trim() ? ` во ${input.city.trim()}` : '';
       return {
-        language,
-        subject: `${input.companyName} — едноставна веб-страница што носи барања`,
-        content: `${greeting}
-
-Додека истражував ${input.industry || 'локални'} бизниси во ${city}, наидов на ${input.companyName}.
-
-Изгледа дека моментално немате активна веб-страница. Многу слични компании губат повици и пораки бидејќи клиентите прво пребаруваат онлајн.
-
-Можам да ви помогнам со чиста, мобилна веб-страница што вклучува:
-- Јасни услуги и начин на контакт
-- Google Maps и клик-за-повикување
-- Основен SEO за ${city}
-
-Доколку ви е од интерес, можам да ви испратам краток предлог и примери.
-
-${signOff}`,
+        subject: `${input.companyName}`,
+        content: joinBody([
+          greeting,
+          `Додека разгледував компании${cityBit}, наидов на ${input.companyName}.`,
+          `Забележав дека моментално немате веб-сајт.`,
+          `Многу компании денес добиваат нови клиенти преку онлајн пребарување, па едноставна веб-страница може да биде корисна како место каде луѓето ќе најдат информации, услуги и контакт.`,
+          `Доколку сакате, можам да ви испратам пример како би можело да изгледа едноставно решение за вашиот бизнис.`,
+          close,
+        ]),
       };
     }
 
     return {
-      language,
-      subject: `Идеја за подобрување на веб-страницата на ${input.companyName}`,
-      content: `${greeting}
-
-Ја прегледав веб-страницата на ${input.companyName}${input.website ? ` (${input.website})` : ''}${score ? ` — резултат на можност ${score}/100` : ''}.
-
-${input.auditSummary || 'Има неколку практични подобрувања што можат да ја зголемат довербата и бројот на барања (мобилно искуство, SEO и појасни патеки за контакт).'}
-
-${input.recommendedService ? `Предлог услуга: ${input.recommendedService}.` : ''}
-
-Специјализирам за редизајн на веб-страници и дигитални надградби за бизниси во Северна Македонија. Со задоволство ќе ви испратам краток резиме и следни чекори — без обврска.
-
-Дали би одговарал краток разговор оваа недела?
-
-${signOff}`,
+      subject: `${input.companyName}`,
+      content: joinBody([
+        greeting,
+        `Го најдов ${input.companyName} додека разгледував локални бизниси и го погледнав вашиот веб-сајт.`,
+        positive ? `Забележав дека ${positive}.` : null,
+        issue,
+        `Сакав само да ви го споделам ова бидејќи веб-сајтот често е првата точка каде што некој се запознава со компанијата.`,
+        `Доколку сакате, можам да ви испратам неколку конкретни предлози без никаква обврска.`,
+        close,
+      ]),
     };
   }
 
-  if (kind === 'FOLLOW_UP') {
+  if (input.kind === 'FOLLOW_UP') {
     return {
-      language,
-      subject: `Following up — website opportunity for ${input.companyName}`,
-      content: `${greeting}
-
-I wanted to quickly follow up on my previous note about improving the online presence of ${input.companyName}${input.city ? ` in ${input.city}` : ''}.
-
-I audited a few local ${input.industry || 'business'} websites and ${input.companyName} stood out as a strong candidate for a practical upgrade (mobile experience, trust signals, and clearer enquiries).
-
-Would you be open to a short 15-minute call this week?
-
-${signOff}`,
+      subject: `Quick note for ${input.companyName}`,
+      content: joinBody([
+        greeting,
+        `Just a quick follow-up on my previous message about ${input.companyName}.`,
+        `I don't want to take much of your time, I just wanted to check if you'd like me to send a few ideas for possible improvements.`,
+        `If now is not the right time, no problem at all.`,
+        `Wishing you continued success.`,
+        close,
+      ]),
     };
   }
 
-  if (noWebsite) {
+  if (!brief.hasWebsite) {
+    const cityBit = input.city?.trim() ? ` in ${input.city.trim()}` : '';
     return {
-      language,
-      subject: `${input.companyName} — a simple website that brings enquiries`,
-      content: `${greeting}
-
-I came across ${input.companyName}${input.city ? ` in ${city}` : ''} while researching ${input.industry || 'local'} businesses in North Macedonia.
-
-It looks like you may not have an active website yet. Many similar businesses lose calls and messages because customers search online first.
-
-I help companies like yours launch a clean, mobile-friendly website with:
-- Clear services and contact options
-- Google Maps and click-to-call
-- Basic SEO for ${city}
-
-If useful, I can share a short proposal and examples.
-
-${signOff}`,
+      subject: `${input.companyName}`,
+      content: joinBody([
+        greeting,
+        `While looking through businesses${cityBit}, I came across ${input.companyName}.`,
+        `I noticed that you currently do not have a website.`,
+        `Many businesses today get discovered through online searches, and a simple website can be a useful place where people can find information, services, and contact details.`,
+        `If you'd like, I can send an example of what a simple solution for your business could look like.`,
+        close,
+      ]),
     };
   }
 
   return {
-    language,
-    subject: `Quick idea to improve ${input.companyName}'s website`,
-    content: `${greeting}
-
-I reviewed the website for ${input.companyName}${input.website ? ` (${input.website})` : ''}${score ? ` — opportunity score ${score}/100` : ''}.
-
-${input.auditSummary || 'There are a few practical improvements that could increase trust and enquiries (mobile experience, SEO, and clearer contact paths).'}
-
-${input.recommendedService ? `Suggested service: ${input.recommendedService}.` : ''}
-
-I specialise in website redesign and digital upgrades for businesses in North Macedonia. Happy to send a short audit summary and suggested next steps — no obligation.
-
-Would a brief call work this week?
-
-${signOff}`,
+    subject: `${input.companyName}`,
+    content: joinBody([
+      greeting,
+      `I found ${input.companyName} while looking through local businesses and took a look at your website.`,
+      positive ? `I noticed that ${positive}.` : null,
+      issue,
+      `I just wanted to share this because a website is often the first place where people get to know a company.`,
+      `If you'd like, I can send a few specific suggestions with no obligation.`,
+      close,
+    ]),
   };
 }
 
-async function generateWithOpenAi(
-  input: EmailGeneratorInput & { language: EmailLanguage },
-): Promise<{ subject: string; content: string } | null> {
-  const baseUrl = process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1';
-  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-  const languageLabel =
-    input.language === 'mk' ? 'Macedonian (македонски)' : 'English';
+function joinBody(parts: Array<string | null | undefined>): string {
+  return parts
+    .map((p) => (p || '').trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
 
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.45,
-      messages: [
-        {
-          role: 'system',
-          content: [
-            `You write professional B2B outreach emails for a web/digital agency in North Macedonia.`,
-            `Write the entire email in ${languageLabel}.`,
-            `Tone: respectful, concrete, commercial but not pushy. 160–220 words.`,
-            `Structure: greeting, why you contacted them, 2–3 specific observations, clear offer, soft CTA, sign-off.`,
-            `Use the audit findings and recommended service when provided. Do not invent fake metrics.`,
-            `Do not include placeholders like [Your Name] — use the provided sender details or omit the personal name.`,
-            `Return JSON with keys subject and content only. content must be plain text with newlines.`,
-          ].join(' '),
-        },
-        {
-          role: 'user',
-          content: JSON.stringify({
-            language: input.language,
-            kind: input.kind || 'OUTREACH',
-            companyName: input.companyName,
-            industry: input.industry,
-            city: input.city,
-            website: input.website,
-            contactName: input.contactName,
-            leadScore: input.score?.score,
-            scoreReasons: input.score?.reasons,
-            auditSummary: input.auditSummary,
-            aiRecommendations: input.aiRecommendations,
-            classification: input.classification,
-            recommendedService: input.recommendedService,
-            senderName: input.senderName,
-            senderCompany: input.senderCompany,
-          }),
-        },
-      ],
-      response_format: { type: 'json_object' },
-    }),
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as {
-    choices?: { message?: { content?: string } }[];
-  };
-  const raw = data.choices?.[0]?.message?.content;
-  if (!raw) return null;
-  const parsed = JSON.parse(raw) as { subject?: string; content?: string };
-  if (!parsed.subject || !parsed.content) return null;
-  return { subject: parsed.subject, content: parsed.content };
+/** Defence if banned jargon ever lands in a draft. */
+export function scrubBannedPhrases(text: string): string {
+  const banned =
+    /\b(AI|ChatGPT|Gemini|automation|lead score|opportunity score|website audit|digital transformation|growth hacking|conversion rate|SEO score|performance score|website analysis)\b/gi;
+  return text.replace(banned, '').replace(/[ \t]{2,}/g, ' ').trim();
 }

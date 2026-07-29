@@ -74,7 +74,7 @@ export default function HomePage() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {kpis.map((kpi) => (
-          <Card key={kpi.label} className="overflow-hidden">
+          <Card key={kpi.label} className="overflow-hidden transition-shadow hover:shadow-md">
             <CardHeader className="pb-2">
               <CardDescription>{kpi.label}</CardDescription>
               <CardTitle className="font-display text-3xl">{kpi.value.toLocaleString()}</CardTitle>

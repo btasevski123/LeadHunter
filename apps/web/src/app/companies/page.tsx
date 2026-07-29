@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   createColumnHelper,
@@ -15,6 +15,7 @@ import {
   OUTREACH_STATUSES,
 } from '@leadhunter/shared';
 import { api } from '@/lib/api';
+import { notify } from '@/lib/toast';
 import type { CompanyListItem, JobRun, Paginated } from '@/lib/types';
 import { cn, scoreColor } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
@@ -59,6 +60,7 @@ export default function CompaniesPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [source, setSource] = useState('google-maps');
   const [trackedJobId, setTrackedJobId] = useState<string | null>(null);
+  const announcedJobRef = useRef<string | null>(null);
 
   const queryString = useMemo(() => {
     const params = new URLSearchParams();
@@ -113,8 +115,17 @@ export default function CompaniesPage() {
     if (activeJob.status === 'COMPLETED' || activeJob.status === 'FAILED') {
       void qc.invalidateQueries({ queryKey: ['companies'] });
       void qc.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      const key = `${activeJob.id}:${activeJob.status}`;
+      if (announcedJobRef.current !== key) {
+        announcedJobRef.current = key;
+        if (activeJob.status === 'COMPLETED') {
+          notify.success('Discovery finished', activeJob.message || undefined);
+        } else {
+          notify.error(activeJob.message || 'Discovery job failed');
+        }
+      }
     }
-  }, [activeJob?.status, activeJob?.id, qc]);
+  }, [activeJob?.status, activeJob?.id, activeJob?.message, qc]);
 
   const discover = useMutation({
     mutationFn: () =>
@@ -127,7 +138,9 @@ export default function CompaniesPage() {
     onSuccess: (job) => {
       if (job?.id) setTrackedJobId(job.id);
       void qc.invalidateQueries({ queryKey: ['jobs'] });
+      notify.success('Discovery started', SOURCES.find((s) => s.id === source)?.label);
     },
+    onError: (error) => notify.error(error, 'Failed to start discovery'),
   });
 
   const columns = useMemo(
@@ -339,35 +352,28 @@ export default function CompaniesPage() {
             </Button>
           </div>
 
-          {(activeJob || discover.isError) && (
+          {activeJob ? (
             <div className="space-y-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2">
-              {activeJob ? (
-                <>
-                  <div className="flex items-center justify-between gap-2 text-sm">
-                    <span className="text-muted-foreground">
-                      {activeJob.type}
-                      {industry ? ` · ${industry}` : ''}
-                      {city ? ` · ${city}` : ''}
-                    </span>
-                    <Badge variant="outline">{activeJob.status}</Badge>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full bg-primary transition-[width] duration-500"
-                      style={{ width: `${Math.min(100, activeJob.progress || 0)}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {activeJob.progress || 0}%
-                    {activeJob.message ? ` · ${activeJob.message}` : ''}
-                  </p>
-                </>
-              ) : null}
-              {discover.isError ? (
-                <p className="text-sm text-rose-400">Failed to start discovery job.</p>
-              ) : null}
+              <div className="flex items-center justify-between gap-2 text-sm">
+                <span className="text-muted-foreground">
+                  {activeJob.type}
+                  {industry ? ` · ${industry}` : ''}
+                  {city ? ` · ${city}` : ''}
+                </span>
+                <Badge variant="outline">{activeJob.status}</Badge>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full bg-primary transition-[width] duration-500"
+                  style={{ width: `${Math.min(100, activeJob.progress || 0)}%` }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {activeJob.progress || 0}%
+                {activeJob.message ? ` · ${activeJob.message}` : ''}
+              </p>
             </div>
-          )}
+          ) : null}
         </CardContent>
       </Card>
 

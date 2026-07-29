@@ -13,6 +13,7 @@ import {
 } from '@dnd-kit/core';
 import { OUTREACH_STATUSES } from '@leadhunter/shared';
 import { api } from '@/lib/api';
+import { notify } from '@/lib/toast';
 import { cn, scoreColor } from '@/lib/utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -42,7 +43,11 @@ export default function OutreachPage() {
   const mutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: string }) =>
       api.patch(`/outreach/${id}`, { status }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['outreach-board'] }),
+    onSuccess: (_data, variables) => {
+      void qc.invalidateQueries({ queryKey: ['outreach-board'] });
+      notify.success('Status updated', variables.status.replaceAll('_', ' '));
+    },
+    onError: (error) => notify.error(error, 'Failed to update status'),
   });
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));

@@ -9,6 +9,10 @@ import type {
 import { normalizeUrl } from '@leadhunter/shared';
 import { generateRuleBasedRecommendations } from './ai-audit';
 import { runLighthouse } from './lighthouse';
+import {
+  analyzeWebsiteForOutreach,
+  extractHtmlOutreachSignals,
+} from './outreach-analysis';
 
 export interface AuditOptions {
   lightweight?: boolean;
@@ -54,6 +58,19 @@ export async function auditWebsite(
         description: 'Company has no website URL on record.',
       },
     ];
+    const outreachAnalysis = analyzeWebsiteForOutreach({
+      websiteExists: false,
+      websiteAccessible: false,
+      sslEnabled: false,
+      mobileFriendly: false,
+      hasContactForm: false,
+      hasGoogleMaps: Boolean(options.hasGooglePresence),
+      hasSocialLinks: false,
+      designAgeEstimate: 'unknown',
+      lighthousePerformance: null,
+      hasPhone: Boolean(options.hasPhone),
+      hasEmail: Boolean(options.hasEmail),
+    });
     return {
       websiteExists: false,
       websiteAccessible: false,
@@ -78,6 +95,7 @@ export async function auditWebsite(
       }),
       issues,
       score,
+      outreachAnalysis,
     };
   }
 
@@ -142,6 +160,19 @@ export async function auditWebsite(
         description: 'Website does not use HTTPS.',
       });
     }
+    const outreachAnalysis = analyzeWebsiteForOutreach({
+      websiteExists: true,
+      websiteAccessible: false,
+      sslEnabled,
+      mobileFriendly: false,
+      hasContactForm: false,
+      hasGoogleMaps: Boolean(options.hasGooglePresence),
+      hasSocialLinks: false,
+      designAgeEstimate: 'unknown',
+      lighthousePerformance: null,
+      hasPhone: Boolean(options.hasPhone),
+      hasEmail: Boolean(options.hasEmail),
+    });
     return {
       websiteExists: true,
       websiteAccessible: false,
@@ -166,6 +197,7 @@ export async function auditWebsite(
       }),
       issues,
       score,
+      outreachAnalysis,
     };
   }
 
@@ -174,6 +206,7 @@ export async function auditWebsite(
   const mobileFriendly =
     /width\s*=\s*device-width/i.test(viewport) ||
     Boolean($('link[rel="stylesheet"]').length && html.includes('@media'));
+  const htmlSignals = extractHtmlOutreachSignals($, html);
 
   const hasContactForm =
     $('form').filter((_, el) => {
@@ -278,6 +311,20 @@ export async function auditWebsite(
   });
 
   const auditSummary = buildSummary(score.score, issues, designAgeEstimate);
+  const outreachAnalysis = analyzeWebsiteForOutreach({
+    websiteExists: true,
+    websiteAccessible: true,
+    sslEnabled,
+    mobileFriendly,
+    hasContactForm,
+    hasGoogleMaps: hasGoogleMaps || Boolean(options.hasGooglePresence),
+    hasSocialLinks,
+    designAgeEstimate,
+    lighthousePerformance,
+    hasPhone: Boolean(options.hasPhone),
+    hasEmail: Boolean(options.hasEmail),
+    htmlSignals,
+  });
 
   return {
     websiteExists: true,
@@ -303,6 +350,7 @@ export async function auditWebsite(
     }),
     issues,
     score,
+    outreachAnalysis,
   };
 }
 

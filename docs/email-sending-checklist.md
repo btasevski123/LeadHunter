@@ -6,19 +6,52 @@ Do **not** commit real SMTP passwords to git. Keep them in `.env` only (already 
 
 ---
 
+## How email drafts are generated
+
+Outreach emails are filled from **fixed MK/EN templates** using facts from the website analyzer:
+
+- 1 positive observation (if any)
+- 1 primary issue (mobile / HTTPS / design / contact / etc.)
+- Soft CTA in founder voice
+
+No Gemini/OpenAI call is made for outreach drafts. Shape matches:
+
+```
+Здраво,
+
+Го најдов {{company}} додека разгледував локални бизниси и го погледнав вашиот веб-сајт.
+
+Забележав дека {{positive}}.
+
+Имаше една работа која мислам дека би можела да се подобри:
+
+{{issue}}
+
+Сакав само да ви го споделам ова бидејќи веб-сајтот често е првата точка каде што некој се запознава со компанијата.
+
+Доколку сакате, можам да ви испратам неколку конкретни предлози без никаква обврска.
+
+Поздрав,
+```
+
+Full templates: `docs/email-templates.md`.
+
+`generationSource` is always `"template"`.
+
+---
+
 ## What is already implemented
 
 | Piece | Status |
 |-------|--------|
-| Generate draft (English / Macedonian) | Done |
-| Richer AI copy when `OPENAI_API_KEY` is set | Done |
-| Rule-based fallback without OpenAI | Done |
+| Generate draft (English / Macedonian) via templates | Done |
+| Analyzer facts → template slots | Done |
 | SMTP send via Nodemailer (`POST /api/emails/:id/send`) | Done |
 | Recipient from company email / contact / override | Done |
 | Mark outreach `CONTACTED` + note after send | Done |
-| Settings page shows SMTP configured or not | Done |
+| Settings page shows SMTP status | Done |
 
-Code: `apps/api/src/emails/`, `packages/audit-engine/src/email-generator.ts`, company detail + Settings UI.
+Code: `apps/api/src/emails/`, `packages/audit-engine/src/email-generator.ts`, `packages/audit-engine/src/outreach-analysis.ts`, company detail + Settings UI.
 
 ---
 

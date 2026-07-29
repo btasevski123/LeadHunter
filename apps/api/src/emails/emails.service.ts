@@ -9,6 +9,23 @@ import type { ScoreResult } from '@leadhunter/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import { readSmtpConfig, sendSmtpMail, smtpConfigured } from './smtp';
 
+function asOutreachAnalysis(value: unknown): {
+  positive_observations: string[];
+  issues: string[];
+} | null {
+  if (!value || typeof value !== 'object') return null;
+  const obj = value as { positive_observations?: unknown; issues?: unknown };
+  if (!Array.isArray(obj.positive_observations) && !Array.isArray(obj.issues)) return null;
+  return {
+    positive_observations: Array.isArray(obj.positive_observations)
+      ? obj.positive_observations.filter((x): x is string => typeof x === 'string')
+      : [],
+    issues: Array.isArray(obj.issues)
+      ? obj.issues.filter((x): x is string => typeof x === 'string')
+      : [],
+  };
+}
+
 @Injectable()
 export class EmailsService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -28,6 +45,9 @@ export class EmailsService {
       fromEmail: config?.fromEmail || null,
       fromName: config?.fromName || null,
       host: config?.host || null,
+      /** @deprecated Emails use templates; kept for older clients. */
+      geminiConfigured: false,
+      emailMode: 'template' as const,
     };
   }
 
@@ -39,7 +59,16 @@ export class EmailsService {
     const company = await this.prisma.company.findUnique({
       where: { id: companyId },
       include: {
-        audits: { where: { isLatest: true }, take: 1 },
+        audits: {
+          where: { isLatest: true },
+          take: 1,
+          include: {
+            issues: {
+              orderBy: { severity: 'desc' },
+              take: 8,
+            },
+          },
+        },
         classification: true,
         contacts: {
           where: { type: 'EMAIL' },
@@ -76,13 +105,50 @@ export class EmailsService {
       aiRecommendations: audit?.aiRecommendations,
       classification: company.classification?.classification || null,
       recommendedService: company.classification?.recommendedService || null,
+      websiteIssues: (audit?.issues || []).map((i) => ({
+        title: i.title,
+        description: i.description,
+        severity: i.severity,
+      })),
+      outreachAnalysis: asOutreachAnalysis(audit?.outreachAnalysis),
+      auditSignals: audit
+        ? {
+            websiteExists: audit.websiteExists,
+            websiteAccessible: audit.websiteAccessible,
+            sslEnabled: audit.sslEnabled,
+            mobileFriendly: audit.mobileFriendly,
+            hasContactForm: audit.hasContactForm,
+            hasGoogleMaps: audit.hasGoogleMaps || Boolean(company.googlePlaceId),
+            hasSocialLinks: audit.hasSocialLinks,
+            designAgeEstimate: (audit.designAgeEstimate as
+              | 'modern'
+              | 'aging'
+              | 'outdated'
+              | 'unknown') || 'unknown',
+            lighthousePerformance: audit.lighthousePerformance,
+            hasPhone: Boolean(company.phone),
+            hasEmail: Boolean(company.email || recipientEmail),
+          }
+        : {
+            websiteExists: Boolean(company.website),
+            websiteAccessible: Boolean(company.website),
+            sslEnabled: true,
+            mobileFriendly: true,
+            hasContactForm: false,
+            hasGoogleMaps: Boolean(company.googlePlaceId),
+            hasSocialLinks: false,
+            designAgeEstimate: 'unknown',
+            lighthousePerformance: null,
+            hasPhone: Boolean(company.phone),
+            hasEmail: Boolean(company.email || recipientEmail),
+          },
       senderName: process.env.SMTP_FROM_NAME || null,
       senderCompany: process.env.SENDER_COMPANY || process.env.SMTP_FROM_NAME || null,
       kind,
       language,
     });
 
-    return this.prisma.emailTemplate.create({
+    const template = await this.prisma.emailTemplate.create({
       data: {
         companyId,
         kind,
@@ -92,6 +158,11 @@ export class EmailsService {
         toEmail: recipientEmail,
       },
     });
+
+    return {
+      ...template,
+      generationSource: generated.source,
+    };
   }
 
   async send(templateId: string, toEmail?: string) {

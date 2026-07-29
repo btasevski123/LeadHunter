@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { OUTREACH_STATUSES } from '@leadhunter/shared';
 import { api, storageUrl } from '@/lib/api';
+import { notify } from '@/lib/toast';
 import { cn, formatDate, scoreColor } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -92,19 +93,30 @@ export default function CompanyDetailPage() {
   const { data: emailStatus } = useQuery({
     queryKey: ['email-status'],
     queryFn: () =>
-      api.get<{ smtpConfigured: boolean; fromEmail: string | null; fromName: string | null }>(
-        '/emails/status',
-      ),
+      api.get<{
+        smtpConfigured: boolean;
+        fromEmail: string | null;
+        fromName: string | null;
+        geminiConfigured?: boolean;
+      }>('/emails/status'),
   });
 
   const auditMutation = useMutation({
     mutationFn: () => api.post(`/companies/${id}/audit`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['company', id] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['company', id] });
+      notify.success('Audit completed');
+    },
+    onError: (error) => notify.error(error, 'Audit failed'),
   });
 
   const classifyMutation = useMutation({
     mutationFn: () => api.post(`/companies/${id}/classify`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['company', id] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['company', id] });
+      notify.success('Lead classified');
+    },
+    onError: (error) => notify.error(error, 'Classification failed'),
   });
 
   const emailMutation = useMutation({
@@ -114,7 +126,11 @@ export default function CompanyDetailPage() {
         kind: 'OUTREACH',
         language: emailLanguage,
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['company', id] }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['company', id] });
+      notify.success('Email draft generated');
+    },
+    onError: (error) => notify.error(error, 'Failed to generate email'),
   });
 
   const sendMutation = useMutation({
@@ -124,16 +140,26 @@ export default function CompanyDetailPage() {
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['company', id] });
+      notify.success('Email sent');
     },
+    onError: (error) => notify.error(error, 'Failed to send email'),
   });
 
   const outreachMutation = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
       api.patch(`/outreach/${data?.outreach?.id}`, body),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       setNote('');
-      qc.invalidateQueries({ queryKey: ['company', id] });
+      void qc.invalidateQueries({ queryKey: ['company', id] });
+      if ('noteBody' in variables || 'notes' in variables) {
+        notify.success('Note saved');
+      } else if ('status' in variables) {
+        notify.success('Outreach status updated');
+      } else {
+        notify.success('Outreach updated');
+      }
     },
+    onError: (error) => notify.error(error, 'Failed to update outreach'),
   });
 
   if (isLoading) return <div className="text-muted-foreground">Loading company…</div>;
@@ -445,9 +471,10 @@ export default function CompanyDetailPage() {
         <CardHeader>
           <CardTitle>Generated emails</CardTitle>
           <CardDescription>
+            Filled from website audit facts (templates — no AI)
             {emailStatus?.smtpConfigured
-              ? `Sends from ${emailStatus.fromName || emailStatus.fromEmail}`
-              : 'SMTP not configured — add SMTP_* vars in .env to send from the platform'}
+              ? ` · Ready to send from ${emailStatus.fromName || emailStatus.fromEmail}`
+              : ' · Drafts only until company mailbox is connected in Settings'}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -462,15 +489,6 @@ export default function CompanyDetailPage() {
               />
             </div>
           </div>
-
-          {emailMutation.isError ? (
-            <p className="text-sm text-rose-400">Failed to generate email.</p>
-          ) : null}
-          {sendMutation.isError ? (
-            <p className="text-sm text-rose-400">
-              {(sendMutation.error as Error)?.message || 'Failed to send email.'}
-            </p>
-          ) : null}
 
           {data.emailTemplates.length === 0 ? (
             <p className="text-sm text-muted-foreground">
@@ -498,21 +516,30 @@ export default function CompanyDetailPage() {
                   {t.content}
                 </pre>
                 <div className="mt-3">
-                  <Button
-                    size="sm"
-                    disabled={
-                      sendMutation.isPending ||
-                      !emailStatus?.smtpConfigured ||
-                      !(sendToOverride.trim() || t.toEmail || data.email)
-                    }
-                    onClick={() => sendMutation.mutate(t.id)}
-                  >
-                    {sendMutation.isPending && sendMutation.variables === t.id
-                      ? 'Sending…'
-                      : t.sentAt
-                        ? 'Send again'
-                        : 'Send email'}
-                  </Button>
+                  {emailStatus?.smtpConfigured ? (
+                    <Button
+                      size="sm"
+                      disabled={
+                        sendMutation.isPending ||
+                        !(sendToOverride.trim() || t.toEmail || data.email)
+                      }
+                      onClick={() => sendMutation.mutate(t.id)}
+                    >
+                      {sendMutation.isPending && sendMutation.variables === t.id
+                        ? 'Sending…'
+                        : t.sentAt
+                          ? 'Send again'
+                          : 'Send email'}
+                    </Button>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Send unlocks after you add your company mailbox in{' '}
+                      <Link href="/settings" className="text-sky-400 hover:underline">
+                        Settings
+                      </Link>
+                      .
+                    </p>
+                  )}
                 </div>
               </div>
             ))

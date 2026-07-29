@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { notify } from '@/lib/toast';
 import type { ImportRun } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -37,7 +38,9 @@ export default function ImportsPage() {
       void qc.invalidateQueries({ queryKey: ['imports'] });
       void qc.invalidateQueries({ queryKey: ['jobs'] });
       void qc.invalidateQueries({ queryKey: ['dashboard-stats'] });
+      notify.success('Scrape:all started');
     },
+    onError: (error) => notify.error(error, 'Failed to start scrape'),
   });
 
   const scrapeYp = useMutation({
@@ -49,7 +52,9 @@ export default function ImportsPage() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['imports'] });
       void qc.invalidateQueries({ queryKey: ['jobs'] });
+      notify.success('Yellow Pages scrape started');
     },
+    onError: (error) => notify.error(error, 'Failed to start Yellow Pages scrape'),
   });
 
   return (

@@ -6,3 +6,5 @@ export * from './discovery';
 export * from './places-enrichment';
 export * from './ai-audit';
 export * from './email-generator';
+export * from './outreach-analysis';
+export * from './gemini';

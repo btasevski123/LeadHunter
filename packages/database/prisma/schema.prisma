@@ -217,6 +217,8 @@ model WebsiteAudit {
   scoreReasons             Json
   auditSummary             String?
   aiRecommendations        String?
+  /** { positive_observations: string[], issues: string[] } for outreach emails */
+  outreachAnalysis         Json?
   issuesCount              Int      @default(0)
   isLatest                 Boolean  @default(true)
   auditedAt                DateTime @default(now())

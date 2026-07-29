@@ -83,3 +83,18 @@ body {
 h1, h2, h3, .font-display {
   font-family: var(--font-display), ui-serif, Georgia, serif;
 }
+
+a[href],
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+label:has(input[type="checkbox"]),
+label:has(input[type="radio"]),
+select:not(:disabled),
+summary {
+  cursor: pointer;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  cursor: pointer;
+}

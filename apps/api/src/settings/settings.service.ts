@@ -19,7 +19,8 @@ export class SettingsService {
       rateLimits: map.rateLimits || {},
       export: map.export || {},
       apiKeys: {
-        openaiConfigured: Boolean(process.env.OPENAI_API_KEY),
+        openaiConfigured: Boolean(process.env.OPENAI_API_KEY?.trim()),
+        geminiConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
         dashboardApiKeyEnabled: Boolean(process.env.API_KEY),
         ...(typeof map.apiKeys === 'object' && map.apiKeys ? map.apiKeys : {}),
       },

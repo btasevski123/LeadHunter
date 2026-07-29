@@ -99,6 +99,7 @@ export const appSettingsSchema = z.object({
   apiKeys: z
     .object({
       openaiConfigured: z.boolean().default(false),
+      geminiConfigured: z.boolean().default(false),
       dashboardApiKeyEnabled: z.boolean().default(false),
     })
     .default({}),
