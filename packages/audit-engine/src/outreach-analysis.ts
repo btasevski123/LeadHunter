@@ -24,6 +24,7 @@ export const ISSUE_VOCAB = [
   'No active website',
   'Website is offline or unreachable',
   'Pages feel slow',
+  'Website is still under construction',
 ] as const;
 
 export type PositiveObservation = (typeof POSITIVE_OBSERVATION_VOCAB)[number];
@@ -46,6 +47,7 @@ export interface OutreachAnalysisInput {
   lighthousePerformance: number | null;
   hasPhone?: boolean;
   hasEmail?: boolean;
+  isPlaceholderSite?: boolean;
   /** Optional HTML signals from the live page parse. */
   htmlSignals?: {
     hasNav: boolean;
@@ -104,6 +106,9 @@ export function analyzeWebsiteForOutreach(
   }
 
   // --- issues ---
+  if (input.isPlaceholderSite) {
+    issues.push('Website is still under construction');
+  }
   if (!input.mobileFriendly) {
     issues.push('Not mobile friendly');
   }

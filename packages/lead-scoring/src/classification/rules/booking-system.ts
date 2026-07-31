@@ -3,7 +3,7 @@ import type { ClassificationRule, ClassificationRuleMatch } from './types';
 
 export const bookingSystemRule: ClassificationRule = {
   id: 'BOOKING_SYSTEM',
-  priority: 4,
+  priority: 5,
   evaluate(ctx): ClassificationRuleMatch | null {
     if (!matchesBookingCategory(ctx.categoryHaystack)) return null;
     if (ctx.hasBooking) return null;

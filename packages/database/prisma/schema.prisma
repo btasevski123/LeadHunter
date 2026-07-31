@@ -82,6 +82,7 @@ enum ExportFormat {
 
 enum LeadClassificationType {
   NO_WEBSITE
+  PLACEHOLDER_WEBSITE
   WEBSITE_REDESIGN
   SEO_IMPROVEMENT
   BOOKING_SYSTEM
@@ -213,6 +214,9 @@ model WebsiteAudit {
   hasPrivacyPolicy         Boolean  @default(false)
   hasCookieNotice          Boolean  @default(false)
   designAgeEstimate        String?
+  /** Under construction / social-only / thin placeholder landing page */
+  isPlaceholderSite        Boolean  @default(false)
+  placeholderSignals       String[] @default([])
   leadScore                Int      @default(0)
   scoreReasons             Json
   auditSummary             String?

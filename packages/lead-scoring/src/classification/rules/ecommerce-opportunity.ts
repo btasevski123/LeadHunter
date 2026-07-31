@@ -3,7 +3,7 @@ import type { ClassificationRule, ClassificationRuleMatch } from './types';
 
 export const ecommerceOpportunityRule: ClassificationRule = {
   id: 'ECOMMERCE_OPPORTUNITY',
-  priority: 5,
+  priority: 6,
   evaluate(ctx): ClassificationRuleMatch | null {
     if (!matchesEcommerceCategory(ctx.categoryHaystack)) return null;
     if (ctx.hasEcommerce) return null;

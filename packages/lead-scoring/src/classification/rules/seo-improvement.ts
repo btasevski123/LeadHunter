@@ -2,7 +2,7 @@ import type { ClassificationRule, ClassificationRuleMatch } from './types';
 
 export const seoImprovementRule: ClassificationRule = {
   id: 'SEO_IMPROVEMENT',
-  priority: 3,
+  priority: 4,
   evaluate(ctx): ClassificationRuleMatch | null {
     if (!ctx.hasWebsite) return null;
     if (ctx.seoScore == null || ctx.seoScore >= 50) return null;

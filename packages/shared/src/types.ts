@@ -149,6 +149,10 @@ export interface WebsiteAuditResult {
   hasPrivacyPolicy: boolean;
   hasCookieNotice: boolean;
   designAgeEstimate: DesignAgeEstimate;
+  /** True when the live site is under construction / social-only / thin placeholder. */
+  isPlaceholderSite: boolean;
+  /** Machine signals that justified isPlaceholderSite (for debugging / emails). */
+  placeholderSignals: string[];
   auditSummary: string;
   aiRecommendations: string;
   issues: AuditIssueInput[];

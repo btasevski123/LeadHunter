@@ -2,6 +2,7 @@ import { bookingSystemRule } from './booking-system';
 import { customSoftwareRule } from './custom-software';
 import { ecommerceOpportunityRule } from './ecommerce-opportunity';
 import { noWebsiteRule } from './no-website';
+import { placeholderWebsiteRule } from './placeholder-website';
 import { seoImprovementRule } from './seo-improvement';
 import type { ClassificationRule } from './types';
 import { websiteRedesignRule } from './website-redesign';
@@ -12,6 +13,7 @@ import { websiteRedesignRule } from './website-redesign';
  */
 export const CLASSIFICATION_RULES: ClassificationRule[] = [
   noWebsiteRule,
+  placeholderWebsiteRule,
   websiteRedesignRule,
   seoImprovementRule,
   bookingSystemRule,

@@ -1,5 +1,6 @@
 export type LeadClassificationType =
   | 'NO_WEBSITE'
+  | 'PLACEHOLDER_WEBSITE'
   | 'WEBSITE_REDESIGN'
   | 'SEO_IMPROVEMENT'
   | 'BOOKING_SYSTEM'
@@ -9,6 +10,7 @@ export type LeadClassificationType =
 
 export const LEAD_CLASSIFICATION_TYPES: LeadClassificationType[] = [
   'NO_WEBSITE',
+  'PLACEHOLDER_WEBSITE',
   'WEBSITE_REDESIGN',
   'SEO_IMPROVEMENT',
   'BOOKING_SYSTEM',
@@ -19,6 +21,7 @@ export const LEAD_CLASSIFICATION_TYPES: LeadClassificationType[] = [
 
 export const KVADRA_SERVICE_BY_CLASSIFICATION: Record<LeadClassificationType, string> = {
   NO_WEBSITE: 'Business Website',
+  PLACEHOLDER_WEBSITE: 'Business Website',
   WEBSITE_REDESIGN: 'Website Redesign',
   SEO_IMPROVEMENT: 'SEO Optimization',
   BOOKING_SYSTEM: 'Booking System Development',
@@ -29,6 +32,7 @@ export const KVADRA_SERVICE_BY_CLASSIFICATION: Record<LeadClassificationType, st
 
 export const LEAD_CLASSIFICATION_LABELS: Record<LeadClassificationType, string> = {
   NO_WEBSITE: 'No website',
+  PLACEHOLDER_WEBSITE: 'Placeholder / under construction',
   WEBSITE_REDESIGN: 'Website redesign',
   SEO_IMPROVEMENT: 'SEO improvement',
   BOOKING_SYSTEM: 'Booking system',
@@ -50,6 +54,8 @@ export interface ClassificationAuditInput {
   seoScore: number | null;
   hasBooking: boolean;
   hasEcommerce: boolean;
+  /** Domain exists but site is under construction / social-only landing. */
+  isPlaceholderSite?: boolean;
 }
 
 export interface ClassificationCompanyInput {

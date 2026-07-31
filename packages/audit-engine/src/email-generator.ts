@@ -45,6 +45,7 @@ export interface EmailGeneratorInput {
     lighthousePerformance?: number | null;
     hasPhone?: boolean;
     hasEmail?: boolean;
+    isPlaceholderSite?: boolean;
   } | null;
   senderName?: string | null;
   senderCompany?: string | null;
@@ -85,6 +86,7 @@ export function resolveOutreachAnalysis(
       lighthousePerformance: s.lighthousePerformance ?? null,
       hasPhone: Boolean(s.hasPhone),
       hasEmail: Boolean(s.hasEmail || input.recipientEmail),
+      isPlaceholderSite: Boolean(s.isPlaceholderSite),
     });
   }
 
@@ -198,6 +200,8 @@ function issueParagraph(issueKey: string | undefined, language: EmailLanguage): 
         'Моментално страницата не се отвора стабилно.',
       'No active website':
         'Моментално нема активна веб-страница.',
+      'Website is still under construction':
+        'Сајтот изгледа сè уште е во изработка или главно води кон социјални мрежи, наместо да претставува целосна веб-страница.',
     };
     return mk[issueKey] || null;
   }
@@ -217,6 +221,8 @@ function issueParagraph(issueKey: string | undefined, language: EmailLanguage): 
       'The website does not open reliably at the moment.',
     'No active website':
       'There does not appear to be an active website right now.',
+    'Website is still under construction':
+      'The website still looks under construction or mainly sends visitors to social media instead of being a full site.',
   };
   return en[issueKey] || null;
 }

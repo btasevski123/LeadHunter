@@ -2,7 +2,7 @@ import type { ClassificationRule, ClassificationRuleMatch } from './types';
 
 export const websiteRedesignRule: ClassificationRule = {
   id: 'WEBSITE_REDESIGN',
-  priority: 2,
+  priority: 3,
   evaluate(ctx): ClassificationRuleMatch | null {
     if (!ctx.hasWebsite) return null;
     if (ctx.designScore == null || ctx.designScore >= 50) return null;

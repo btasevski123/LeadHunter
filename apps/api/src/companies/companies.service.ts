@@ -444,6 +444,8 @@ export class CompaniesService {
         hasPrivacyPolicy: result.hasPrivacyPolicy,
         hasCookieNotice: result.hasCookieNotice,
         designAgeEstimate: result.designAgeEstimate,
+        isPlaceholderSite: result.isPlaceholderSite,
+        placeholderSignals: result.placeholderSignals,
         leadScore: result.score.score,
         scoreReasons: result.score.reasons,
         auditSummary: result.auditSummary,

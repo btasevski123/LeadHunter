@@ -13,6 +13,7 @@ export interface ClassificationRuleContext {
   seoScore: number | null;
   hasBooking: boolean;
   hasEcommerce: boolean;
+  isPlaceholderSite: boolean;
 }
 
 export interface ClassificationRuleMatch {

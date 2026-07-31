@@ -13,6 +13,7 @@ import {
   analyzeWebsiteForOutreach,
   extractHtmlOutreachSignals,
 } from './outreach-analysis';
+import { detectPlaceholderSite } from './placeholder-detection';
 
 export interface AuditOptions {
   lightweight?: boolean;
@@ -86,6 +87,8 @@ export async function auditWebsite(
       hasPrivacyPolicy: false,
       hasCookieNotice: false,
       designAgeEstimate: 'unknown',
+      isPlaceholderSite: false,
+      placeholderSignals: [],
       auditSummary: 'No website found. Highest opportunity for a new website project.',
       aiRecommendations: generateRuleBasedRecommendations({
         companyName: 'Company',
@@ -188,6 +191,8 @@ export async function auditWebsite(
       hasPrivacyPolicy: false,
       hasCookieNotice: false,
       designAgeEstimate: 'unknown',
+      isPlaceholderSite: false,
+      placeholderSignals: [],
       auditSummary: 'Website URL exists but is not accessible.',
       aiRecommendations: generateRuleBasedRecommendations({
         companyName: 'Company',
@@ -241,6 +246,12 @@ export async function auditWebsite(
 
   const designAgeEstimate = estimateDesignAge($, html);
 
+  const placeholder = detectPlaceholderSite($, html, {
+    hasContactForm,
+    hasNav: htmlSignals.hasNav,
+    serviceCopyLikely: htmlSignals.serviceCopyLikely,
+  });
+
   let lighthousePerformance: number | null = null;
   let lighthouseSeo: number | null = null;
   let lighthouseAccessibility: number | null = null;
@@ -287,6 +298,7 @@ export async function auditWebsite(
     lighthousePerformance,
     lighthouseSeo,
     lighthouseAccessibility,
+    isPlaceholderSite: placeholder.isPlaceholderSite,
   });
 
   const score = scoreLead({
@@ -303,6 +315,7 @@ export async function auditWebsite(
     hasPrivacyPolicy,
     hasCookieNotice,
     designAgeEstimate,
+    isPlaceholderSite: placeholder.isPlaceholderSite,
     hasEmail: Boolean(options.hasEmail),
     hasPhone: Boolean(options.hasPhone),
     hasGooglePresence: Boolean(options.hasGooglePresence),
@@ -310,7 +323,12 @@ export async function auditWebsite(
     sourceQualityScore: options.sourceQualityScore,
   });
 
-  const auditSummary = buildSummary(score.score, issues, designAgeEstimate);
+  const auditSummary = buildSummary(
+    score.score,
+    issues,
+    designAgeEstimate,
+    placeholder.isPlaceholderSite,
+  );
   const outreachAnalysis = analyzeWebsiteForOutreach({
     websiteExists: true,
     websiteAccessible: true,
@@ -323,6 +341,7 @@ export async function auditWebsite(
     lighthousePerformance,
     hasPhone: Boolean(options.hasPhone),
     hasEmail: Boolean(options.hasEmail),
+    isPlaceholderSite: placeholder.isPlaceholderSite,
     htmlSignals,
   });
 
@@ -341,6 +360,8 @@ export async function auditWebsite(
     hasPrivacyPolicy,
     hasCookieNotice,
     designAgeEstimate,
+    isPlaceholderSite: placeholder.isPlaceholderSite,
+    placeholderSignals: placeholder.placeholderSignals,
     auditSummary,
     aiRecommendations: generateRuleBasedRecommendations({
       companyName: 'Company',
@@ -454,8 +475,18 @@ function buildIssues(input: {
   lighthousePerformance: number | null;
   lighthouseSeo: number | null;
   lighthouseAccessibility: number | null;
+  isPlaceholderSite?: boolean;
 }): AuditIssueInput[] {
   const issues: AuditIssueInput[] = [];
+  if (input.isPlaceholderSite) {
+    issues.push({
+      code: 'PLACEHOLDER_SITE',
+      severity: 'CRITICAL',
+      title: 'Placeholder / under construction',
+      description:
+        'Site appears to be under construction or only redirects visitors to social media.',
+    });
+  }
   if (!input.sslEnabled) {
     issues.push({
       code: 'NO_SSL',
@@ -558,11 +589,15 @@ function buildSummary(
   score: number,
   issues: AuditIssueInput[],
   designAgeEstimate: DesignAgeEstimate,
+  isPlaceholderSite = false,
 ): string {
   const top = issues
     .filter((i) => i.severity === 'CRITICAL' || i.severity === 'HIGH')
     .map((i) => i.title)
     .slice(0, 4);
   const issueText = top.length ? top.join('; ') : 'No critical issues detected';
-  return `Lead score ${score}/100. Design age: ${designAgeEstimate}. Key findings: ${issueText}.`;
+  const placeholderBit = isPlaceholderSite
+    ? ' Placeholder/under-construction site detected.'
+    : '';
+  return `Lead score ${score}/100. Design age: ${designAgeEstimate}.${placeholderBit} Key findings: ${issueText}.`;
 }

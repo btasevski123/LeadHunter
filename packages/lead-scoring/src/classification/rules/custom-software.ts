@@ -3,7 +3,7 @@ import type { ClassificationRule, ClassificationRuleMatch } from './types';
 
 export const customSoftwareRule: ClassificationRule = {
   id: 'CUSTOM_SOFTWARE',
-  priority: 6,
+  priority: 7,
   evaluate(ctx): ClassificationRuleMatch | null {
     if (!matchesCustomSoftwareCategory(ctx.categoryHaystack)) return null;
     return {

@@ -14,7 +14,38 @@ test('RULE 1: no website → NO_WEBSITE', () => {
   assert.deepEqual(result.reasons, ['Company does not have a website']);
 });
 
-test('RULE 2: low design score → WEBSITE_REDESIGN', () => {
+test('RULE 2: placeholder site → PLACEHOLDER_WEBSITE', () => {
+  const result = classifyCompany({
+    website: 'https://stikeri.mk',
+    audit: {
+      designScore: 80,
+      seoScore: 80,
+      hasBooking: false,
+      hasEcommerce: false,
+      isPlaceholderSite: true,
+    },
+  });
+  assert.equal(result.classification, 'PLACEHOLDER_WEBSITE');
+  assert.equal(result.confidence, 95);
+  assert.equal(result.recommendedService, 'Business Website');
+  assert.ok(result.reasons.some((r) => /placeholder|under construction/i.test(r)));
+});
+
+test('priority: PLACEHOLDER beats redesign', () => {
+  const result = classifyCompany({
+    website: 'https://stikeri.mk',
+    audit: {
+      designScore: 20,
+      seoScore: 10,
+      hasBooking: false,
+      hasEcommerce: false,
+      isPlaceholderSite: true,
+    },
+  });
+  assert.equal(result.classification, 'PLACEHOLDER_WEBSITE');
+});
+
+test('RULE 3: low design score → WEBSITE_REDESIGN', () => {
   const result = classifyCompany({
     website: 'https://example.mk',
     audit: { designScore: 40, seoScore: 80, hasBooking: false, hasEcommerce: false },
@@ -24,7 +55,7 @@ test('RULE 2: low design score → WEBSITE_REDESIGN', () => {
   assert.equal(result.recommendedService, 'Website Redesign');
 });
 
-test('RULE 3: low SEO score → SEO_IMPROVEMENT', () => {
+test('RULE 4: low SEO score → SEO_IMPROVEMENT', () => {
   const result = classifyCompany({
     website: 'https://example.mk',
     audit: { designScore: 70, seoScore: 35, hasBooking: false, hasEcommerce: false },
@@ -34,7 +65,7 @@ test('RULE 3: low SEO score → SEO_IMPROVEMENT', () => {
   assert.equal(result.recommendedService, 'SEO Optimization');
 });
 
-test('RULE 4: booking category without booking → BOOKING_SYSTEM', () => {
+test('RULE 5: booking category without booking → BOOKING_SYSTEM', () => {
   const result = classifyCompany({
     website: 'https://dental.mk',
     industry: 'DENTAL',
@@ -45,7 +76,7 @@ test('RULE 4: booking category without booking → BOOKING_SYSTEM', () => {
   assert.equal(result.confidence, 90);
 });
 
-test('RULE 4 skipped when booking detected', () => {
+test('RULE 5 skipped when booking detected', () => {
   const result = classifyCompany({
     website: 'https://dental.mk',
     industry: 'DENTAL',
@@ -54,7 +85,7 @@ test('RULE 4 skipped when booking detected', () => {
   assert.equal(result.classification, 'NO_ACTION');
 });
 
-test('RULE 5: retail without ecommerce → ECOMMERCE_OPPORTUNITY', () => {
+test('RULE 6: retail without ecommerce → ECOMMERCE_OPPORTUNITY', () => {
   const result = classifyCompany({
     website: 'https://shop.mk',
     industry: 'RETAIL',
@@ -65,7 +96,7 @@ test('RULE 5: retail without ecommerce → ECOMMERCE_OPPORTUNITY', () => {
   assert.equal(result.confidence, 80);
 });
 
-test('RULE 6: manufacturing → CUSTOM_SOFTWARE', () => {
+test('RULE 7: manufacturing → CUSTOM_SOFTWARE', () => {
   const result = classifyCompany({
     website: 'https://factory.mk',
     industry: 'MANUFACTURING',

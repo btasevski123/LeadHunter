@@ -19,6 +19,7 @@ type CompanyForClassification = {
     sslEnabled: boolean;
     lighthousePerformance: number | null;
     lighthouseSeo: number | null;
+    isPlaceholderSite?: boolean;
   }>;
 };
 
@@ -48,6 +49,7 @@ export class LeadClassificationService {
             // V1: booking / ecommerce detection not yet in audit pipeline
             hasBooking: false,
             hasEcommerce: false,
+            isPlaceholderSite: Boolean(audit.isPlaceholderSite),
           }
         : null,
     };
@@ -73,6 +75,7 @@ export class LeadClassificationService {
             sslEnabled: true,
             lighthousePerformance: true,
             lighthouseSeo: true,
+            isPlaceholderSite: true,
           },
         },
       },

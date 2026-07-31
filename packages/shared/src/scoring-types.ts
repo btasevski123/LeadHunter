@@ -15,6 +15,8 @@ export interface ScoringInput {
   hasCookieNotice: boolean;
   designAgeEstimate: DesignAgeEstimate;
   hasEmail: boolean;
+  /** Domain live but site is placeholder / under construction / social-only. */
+  isPlaceholderSite?: boolean;
   /** Optional enrichment for lead opportunity scoring */
   hasPhone?: boolean;
   hasGooglePresence?: boolean;

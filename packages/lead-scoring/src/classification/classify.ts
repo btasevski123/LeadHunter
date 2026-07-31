@@ -24,6 +24,7 @@ function buildContext(company: ClassificationCompanyInput): ClassificationRuleCo
     seoScore: audit?.seoScore ?? null,
     hasBooking: audit?.hasBooking ?? false,
     hasEcommerce: audit?.hasEcommerce ?? false,
+    isPlaceholderSite: Boolean(audit?.isPlaceholderSite),
   };
 }
 

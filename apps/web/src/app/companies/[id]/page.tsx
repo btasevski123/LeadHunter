@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { OUTREACH_STATUSES } from '@leadhunter/shared';
+import { OUTREACH_STATUSES, LEAD_CLASSIFICATION_LABELS } from '@leadhunter/shared';
 import { api, storageUrl } from '@/lib/api';
 import { notify } from '@/lib/toast';
 import { cn, formatDate, scoreColor } from '@/lib/utils';
@@ -68,6 +68,7 @@ type CompanyDetail = {
     designAgeEstimate: string | null;
     sslEnabled: boolean;
     mobileFriendly: boolean;
+    isPlaceholderSite?: boolean;
     lighthousePerformance: number | null;
     lighthouseSeo: number | null;
     lighthouseAccessibility: number | null;
@@ -278,7 +279,11 @@ export default function CompanyDetailPage() {
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="rounded-md bg-muted/40 px-3 py-3">
                   <div className="text-xs text-muted-foreground">Classification</div>
-                  <div className="mt-1 font-medium">{classification.classification}</div>
+                  <div className="mt-1 font-medium">
+                    {LEAD_CLASSIFICATION_LABELS[
+                      classification.classification as keyof typeof LEAD_CLASSIFICATION_LABELS
+                    ] ?? classification.classification}
+                  </div>
                 </div>
                 <div className="rounded-md bg-muted/40 px-3 py-3">
                   <div className="text-xs text-muted-foreground">Confidence</div>
@@ -327,6 +332,10 @@ export default function CompanyDetailPage() {
                   <Metric label="SEO" value={audit.lighthouseSeo ?? '—'} />
                   <Metric label="A11y" value={audit.lighthouseAccessibility ?? '—'} />
                   <Metric label="Design age" value={audit.designAgeEstimate || '—'} />
+                  <Metric
+                    label="Placeholder"
+                    value={audit.isPlaceholderSite ? 'Yes' : 'No'}
+                  />
                 </div>
                 <div className="space-y-2">
                   <div className="font-medium">Issues</div>

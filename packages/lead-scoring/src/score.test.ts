@@ -87,3 +87,27 @@ test('outdated no-ssl mobile-poor scores high', () => {
   assert.ok(result.score >= 80);
   assert.ok(result.reasons.includes('No SSL'));
 });
+
+test('placeholder site scores as hot lead even if otherwise modern', () => {
+  const result = scoreLead({
+    websiteExists: true,
+    websiteAccessible: true,
+    sslEnabled: true,
+    mobileFriendly: true,
+    lighthousePerformance: 85,
+    lighthouseSeo: 90,
+    lighthouseAccessibility: 90,
+    hasContactForm: false,
+    hasGoogleMaps: false,
+    hasSocialLinks: true,
+    hasPrivacyPolicy: false,
+    hasCookieNotice: false,
+    designAgeEstimate: 'modern',
+    isPlaceholderSite: true,
+    hasEmail: true,
+    hasPhone: true,
+    hasGooglePresence: true,
+  });
+  assert.ok(result.score >= 90, `expected >=90 got ${result.score}`);
+  assert.ok(result.reasons.includes('Placeholder / under-construction website'));
+});

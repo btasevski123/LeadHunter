@@ -60,6 +60,29 @@ export function scoreLead(input: ScoringInput): ScoreResult {
     return { score: clamp(score, 0, 100), reasons: reasonsOffline };
   }
 
+  // Domain exists but site is under construction / social-only landing
+  if (input.isPlaceholderSite) {
+    let score = 90;
+    const placeholderReasons = ['Placeholder / under-construction website'];
+    if (highValueIndustry) {
+      score += 3;
+      placeholderReasons.push('High-value industry');
+    }
+    if (input.hasGooglePresence) {
+      score += 2;
+      placeholderReasons.push('Google Maps presence');
+    }
+    if (input.hasPhone) {
+      score += 2;
+      placeholderReasons.push('Phone available');
+    }
+    if (input.hasEmail) {
+      score += 2;
+      placeholderReasons.push('Email available');
+    }
+    return { score: clamp(score, 0, 100), reasons: placeholderReasons };
+  }
+
   let score = 35;
 
   if (highValueIndustry) {

@@ -128,6 +128,7 @@ export class EmailsService {
             lighthousePerformance: audit.lighthousePerformance,
             hasPhone: Boolean(company.phone),
             hasEmail: Boolean(company.email || recipientEmail),
+            isPlaceholderSite: Boolean(audit.isPlaceholderSite),
           }
         : {
             websiteExists: Boolean(company.website),
